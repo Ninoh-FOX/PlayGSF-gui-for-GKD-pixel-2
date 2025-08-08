@@ -2,13 +2,17 @@
 #include <SDL2/SDL_ttf.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
+#include <sys/types.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <iostream>
 #include <chrono>
+#include <cstdio>
+#include <cstring>
 
 // Incluye tu cabecera de psftag (asegúrate de que psftag.c esté compilado y enlazado)
 extern "C" {
@@ -192,7 +196,7 @@ void draw_list() {
     int y = lh + 5;
     for (int i = scroll_offset; i < total && i < scroll_offset + max_lines; ++i) {
         SDL_Color color = (i == selected_index) ? highlight : (entries[i].is_dir ? dir_color : white);
-        std::string prefix = entries[i].is_dir ? "[DIR] " : "      ";
+        std::string prefix = entries[i].is_dir ? "[DIR] " : " ";
         render_text(prefix + entries[i].name, 10, y, color);
         y += lh;
     }
@@ -204,37 +208,79 @@ void draw_list() {
 }
 
 void draw_playback(const TrackMetadata& meta, int elapsed) {
-    SDL_SetRenderDrawColor(renderer, 0,0,0,255);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
-    SDL_Color white = {255,255,255,255};
-    SDL_Color yellow = {255,255,0,255};
-    SDL_Color cyan = {0,255,255,255};
+
+    SDL_Color green = {0, 255, 0, 255};     // Verde para textos fijos
+    SDL_Color orange = {255, 165, 0, 255};  // Naranja para textos dinámicos
+
     int y = 20;
-    render_text("Now Playing...", 20, y, yellow);
+    render_text("Now Playing...", 20, y, green);
     y += 40;
-    if (!meta.game.empty()) { render_text("Game: " + meta.game, 20, y, white); y += 30; }
-    if (!meta.title.empty()) { render_text("Title: " + meta.title, 20, y, white); y += 30; }
-    if (!meta.artist.empty()) { render_text("Artist: " + meta.artist, 20, y, white); y += 30; }
-    if (!meta.length.empty()) { render_text("Length: " + meta.length, 20, y, yellow); y += 30; }
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Elapsed: %02d:%02d", elapsed / 60, elapsed % 60);
-    render_text(buf, 20, y, cyan);
-    y += 30;
-    if (!meta.year.empty()) { render_text("Year: " + meta.year, 20, y, white); y += 30; }
-    if (!meta.gsf_by.empty()) { render_text("GSF By: " + meta.gsf_by, 20, y, white); y += 30; }
-    if (!meta.copyright.empty()) { render_text(meta.copyright, 20, y, white); y += 30; }
 
-    // Mostrar modo loop en reproducción también
-    std::string loop_text = "Loop: ";
-    switch (loop_mode) {
-        case LOOP_OFF: loop_text += "OFF"; break;
-        case LOOP_ONE: loop_text += "ONE"; break;
-        case LOOP_ALL: loop_text += "ALL"; break;
+    if (!meta.game.empty()) {
+        render_text("Game: ", 20, y, green);
+        render_text(meta.game, 100, y, orange);
+        y += 30;
     }
-    render_text(loop_text, 500, SCREEN_HEIGHT - 100, yellow);
+    if (!meta.title.empty()) {
+        render_text("Title: ", 20, y, green);
+        render_text(meta.title, 100, y, orange);
+        y += 30;
+    }
+    if (!meta.artist.empty()) {
+        render_text("Artist: ", 20, y, green);
+        render_text(meta.artist, 100, y, orange);
+        y += 30;
+    }
+    if (!meta.length.empty()) {
+        // Quitar decimales si existen
+        std::string length_no_decimal = meta.length;
+        size_t dot_pos = length_no_decimal.find('.');
+        if (dot_pos != std::string::npos) {
+            length_no_decimal = length_no_decimal.substr(0, dot_pos);
+        }
+        render_text("Length: ", 20, y, green);
+        render_text(length_no_decimal, 120, y, orange);
+        y += 30;
+    }
 
-    render_text("B:Back  L2/R2:Prev/Next  Y:Loop Mode  Menu:Lock", 10, SCREEN_HEIGHT-70, yellow);
-    render_text("ST:Pause  SL:exit", 10, SCREEN_HEIGHT-40, yellow);
+    char buf[32];
+    int seconds_to_show = elapsed < 0 ? -elapsed : elapsed;
+    snprintf(buf, sizeof(buf), "%02d:%02d", seconds_to_show / 60, seconds_to_show % 60);
+    render_text("Elapsed: ", 20, y, green);
+    render_text(buf, 140, y, orange);
+    y += 30;
+
+    if (!meta.year.empty()) {
+        render_text("Year: ", 20, y, green);
+        render_text(meta.year, 100, y, orange);
+        y += 30;
+    }
+    if (!meta.gsf_by.empty()) {
+        render_text("GSF By: ", 20, y, green);
+        render_text(meta.gsf_by, 120, y, orange);
+        y += 30;
+    }
+    if (!meta.copyright.empty()) {
+        render_text("Copyright: ", 20, y, green);
+        render_text(meta.copyright, 160, y, orange);
+        y += 30;
+    }
+
+    // Mostrar modo loop con texto fijo en verde y valor en naranja
+    std::string loop_text_val;
+    switch (loop_mode) {
+        case LOOP_OFF: loop_text_val = "OFF"; break;
+        case LOOP_ONE: loop_text_val = "ONE"; break;
+        case LOOP_ALL: loop_text_val = "ALL"; break;
+    }
+    render_text("Loop: ", 500, SCREEN_HEIGHT - 100, green);
+    render_text(loop_text_val, 570, SCREEN_HEIGHT - 100, orange);
+
+    render_text("B:Back  L2/R2:Prev/Next  Y:Loop Mode  Menu:Lock", 10, SCREEN_HEIGHT - 70, green);
+    render_text("ST:Pause  SL:exit", 10, SCREEN_HEIGHT - 40, green);
+
     SDL_RenderPresent(renderer);
 }
 
@@ -248,8 +294,12 @@ int main() {
         SDL_Quit();
         return 1;
     }
-    window = SDL_CreateWindow("playgsf selector", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                              SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_FULLSCREEN_DESKTOP);
+
+    window = SDL_CreateWindow("playgsf selector",
+                          SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                          SCREEN_WIDTH, SCREEN_HEIGHT,
+                          SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS);
+
     if (!window) {
         fprintf(stderr, "SDL_CreateWindow error: %s\n", SDL_GetError());
         TTF_Quit();
@@ -371,6 +421,7 @@ int main() {
                         if (mode == MODE_LIST) draw_list();
                         else draw_playback(current_meta, elapsed_seconds);
                     }
+					SDL_Delay(60);
                     continue;
                 }
                 if (screen_off) continue;
