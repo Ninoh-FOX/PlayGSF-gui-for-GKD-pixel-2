@@ -357,9 +357,7 @@ int main() {
             if (e.type == SDL_QUIT) {
                 running = false;
             } else if (e.type == SDL_CONTROLLERBUTTONDOWN) {
-                if (e.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) {
-                    running = false;
-                } else if (e.cbutton.button == SDL_CONTROLLER_BUTTON_GUIDE) {
+                if (e.cbutton.button == SDL_CONTROLLER_BUTTON_GUIDE) {
                     if (!screen_off) {
                         system("wlr-randr --output DSI-1 --off");
                         FILE* f = fopen("/sys/class/backlight/backlight/bl_power", "w");
@@ -376,6 +374,10 @@ int main() {
                     continue;
                 }
                 if (screen_off) continue;
+                
+                if (e.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) {
+                    running = false;
+                }
 
                 if (mode == MODE_PLAYBACK && e.cbutton.button == SDL_CONTROLLER_BUTTON_Y) {
                     loop_mode = static_cast<LoopMode>((loop_mode + 1) % 3);
