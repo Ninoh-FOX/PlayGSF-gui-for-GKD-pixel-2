@@ -114,7 +114,7 @@ bool launch_playgsf(const std::string& filepath) {
     if (playgsf_pid != -1) return false;
     pid_t pid = fork();
     if (pid == 0) {
-        execl("/usr/bin/playgsf", "playgsf", "-c", "-s", filepath.c_str(), nullptr);
+        execl("/usr/bin/playgsf", "playgsf", "-c", "-s", "-q", filepath.c_str(), nullptr);
         _exit(127);
     } else if (pid > 0) {
         playgsf_pid = pid;
