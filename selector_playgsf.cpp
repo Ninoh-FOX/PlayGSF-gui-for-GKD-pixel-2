@@ -14,7 +14,6 @@
 #include <cstdio>
 #include <cstring>
 
-// Incluye tu cabecera de psftag (asegúrate de que psftag.c esté compilado y enlazado)
 extern "C" {
 #include "VBA/psftag.h"
 }
@@ -30,11 +29,10 @@ struct Entry {
 };
 
 enum Mode { MODE_LIST, MODE_PLAYBACK };
-Mode mode = MODE_LIST;
-
 enum LoopMode { LOOP_OFF, LOOP_ONE, LOOP_ALL };
-LoopMode loop_mode = LOOP_ALL;  // Estado por defecto del loop
 
+Mode mode = MODE_LIST;
+LoopMode loop_mode = LOOP_ALL;
 std::vector<Entry> entries;
 std::string current_path = MUSIC_ROOT;
 int selected_index = 0;
@@ -51,18 +49,16 @@ TTF_Font* font = nullptr;
 const int TRIGGER_THRESHOLD = 16000;
 bool l2_prev = false, r2_prev = false;
 
+// NUEVAS BANDERAS DE CONTROL SALTO MANUAL
+bool manual_switch = false;
+bool manual_forward = true;
+
+// Estructura de metadatos de pista
 struct TrackMetadata {
-    std::string filename;
-    std::string title;
-    std::string artist;
-    std::string game;
-    std::string year;
-    std::string copyright;
-    std::string gsf_by;
-    std::string length;
+    std::string filename, title, artist, game, year, copyright, gsf_by, length;
 };
 
-// Función clamp manual para C++14
+// Clamp manual (C++14)
 static void clamp_index(int& idx, int low, int high) {
     if (idx < low) idx = low;
     if (idx > high) idx = high;
@@ -110,8 +106,6 @@ void list_directory(const std::string& path, bool reset_selection = true) {
 void kill_playgsf() {
     if (playgsf_pid > 0) {
         kill(playgsf_pid, SIGKILL);
-        waitpid(playgsf_pid, nullptr, 0);
-        playgsf_pid = -1;
         paused = false;
     }
 }
@@ -140,6 +134,26 @@ int find_next_track(int current, bool forward = true) {
             return idx;
     } while (idx != current);
     return current;
+}
+
+// Parse de etiquetas length en formato "m:ss", "ss" o "ss.xxx"
+int parse_length(const std::string& str) {
+    if (str.empty()) return 0;
+    int min = 0, sec = 0;
+    size_t colon = str.find(':');
+    size_t dot = str.find('.');
+    try {
+        if (colon != std::string::npos) {
+            min = std::stoi(str.substr(0, colon));
+            sec = std::stoi(str.substr(colon + 1));
+            return min * 60 + sec;
+        } else if (dot != std::string::npos) {
+            return std::stoi(str.substr(0, dot));
+        }
+        return std::stoi(str);
+    } catch(...) {
+        return 0;
+    }
 }
 
 bool read_metadata(const std::string& file, TrackMetadata& out) {
@@ -211,202 +225,137 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
-    SDL_Color green = {0, 255, 0, 255};     // Verde para textos fijos
-    SDL_Color orange = {255, 165, 0, 255};  // Naranja para textos dinámicos
-
+    SDL_Color green = {0, 255, 0, 255};
+    SDL_Color orange = {255, 165, 0, 255};
     int y = 20;
     render_text("Now Playing...", 20, y, green);
     y += 40;
 
-    if (!meta.game.empty()) {
-        render_text("Game: ", 20, y, green);
-        render_text(meta.game, 100, y, orange);
-        y += 30;
-    }
-    if (!meta.title.empty()) {
-        render_text("Title: ", 20, y, green);
-        render_text(meta.title, 100, y, orange);
-        y += 30;
-    }
-    if (!meta.artist.empty()) {
-        render_text("Artist: ", 20, y, green);
-        render_text(meta.artist, 100, y, orange);
-        y += 30;
-    }
+    if (!meta.game.empty())        { render_text("Game: ", 20, y, green); render_text(meta.game, 100, y, orange); y += 30; }
+    if (!meta.title.empty())       { render_text("Title: ", 20, y, green); render_text(meta.title, 100, y, orange); y += 30; }
+    if (!meta.artist.empty())      { render_text("Artist: ", 20, y, green); render_text(meta.artist, 100, y, orange); y += 30; }
     if (!meta.length.empty()) {
-        // Quitar decimales si existen
-        std::string length_no_decimal = meta.length;
-        size_t dot_pos = length_no_decimal.find('.');
-        if (dot_pos != std::string::npos) {
-            length_no_decimal = length_no_decimal.substr(0, dot_pos);
-        }
-        render_text("Length: ", 20, y, green);
-        render_text(length_no_decimal, 120, y, orange);
-        y += 30;
+        std::string length_no_decimal = meta.length; size_t dot = length_no_decimal.find('.'); if (dot != std::string::npos) length_no_decimal = length_no_decimal.substr(0, dot);
+        render_text("Length: ", 20, y, green); render_text(length_no_decimal, 120, y, orange); y += 30;
     }
-
-    char buf[32];
-    int seconds_to_show = elapsed < 0 ? -elapsed : elapsed;
-    snprintf(buf, sizeof(buf), "%02d:%02d", seconds_to_show / 60, seconds_to_show % 60);
-    render_text("Elapsed: ", 20, y, green);
-    render_text(buf, 140, y, orange);
-    y += 30;
-
-    if (!meta.year.empty()) {
-        render_text("Year: ", 20, y, green);
-        render_text(meta.year, 100, y, orange);
-        y += 30;
-    }
-    if (!meta.gsf_by.empty()) {
-        render_text("GSF By: ", 20, y, green);
-        render_text(meta.gsf_by, 120, y, orange);
-        y += 30;
-    }
-    if (!meta.copyright.empty()) {
-        render_text("Copyright: ", 20, y, green);
-        render_text(meta.copyright, 160, y, orange);
-        y += 30;
-    }
-
-    // Mostrar modo loop con texto fijo en verde y valor en naranja
-    std::string loop_text_val;
-    switch (loop_mode) {
-        case LOOP_OFF: loop_text_val = "OFF"; break;
-        case LOOP_ONE: loop_text_val = "ONE"; break;
-        case LOOP_ALL: loop_text_val = "ALL"; break;
-    }
-    render_text("Loop: ", 500, SCREEN_HEIGHT - 100, green);
-    render_text(loop_text_val, 570, SCREEN_HEIGHT - 100, orange);
+    char buf[32]; snprintf(buf, sizeof(buf), "%02d:%02d", elapsed/60, elapsed%60);
+    render_text("Elapsed: ", 20, y, green); render_text(buf, 140, y, orange); y += 30;
+    if (!meta.year.empty())        { render_text("Year: ", 20, y, green); render_text(meta.year, 100, y, orange); y += 30; }
+    if (!meta.gsf_by.empty())      { render_text("GSF By: ", 20, y, green); render_text(meta.gsf_by, 120, y, orange); y += 30; }
+    if (!meta.copyright.empty())   { render_text("Copyright: ", 20, y, green); render_text(meta.copyright, 160, y, orange); y += 30; }
+    std::string looptxt = (loop_mode == LOOP_ALL) ? "ALL" : (loop_mode == LOOP_ONE) ? "ONE" : "OFF";
+    render_text("Loop: ", 500, SCREEN_HEIGHT-100, green);
+    render_text(looptxt, 570, SCREEN_HEIGHT-100, orange);
 
     render_text("B:Back  L2/R2:Prev/Next  Y:Loop Mode  Menu:Lock", 10, SCREEN_HEIGHT - 70, green);
     render_text("ST:Pause  SL:exit", 10, SCREEN_HEIGHT - 40, green);
-
     SDL_RenderPresent(renderer);
 }
 
 int main() {
-    if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER) != 0) {
-        fprintf(stderr, "SDL_Init error: %s\n", SDL_GetError());
-        return 1;
-    }
-    if (TTF_Init() != 0) {
-        fprintf(stderr, "TTF_Init error: %s\n", TTF_GetError());
-        SDL_Quit();
-        return 1;
-    }
-
-    window = SDL_CreateWindow("playgsf selector",
-                          SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                          SCREEN_WIDTH, SCREEN_HEIGHT,
-                          SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS);
-
-    if (!window) {
-        fprintf(stderr, "SDL_CreateWindow error: %s\n", SDL_GetError());
-        TTF_Quit();
-        SDL_Quit();
-        return 1;
-    }
+    if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER) != 0) { fprintf(stderr, "SDL_Init error: %s\n", SDL_GetError()); return 1; }
+    if (TTF_Init() != 0) { fprintf(stderr, "TTF_Init error: %s\n", TTF_GetError()); SDL_Quit(); return 1; }
+    window = SDL_CreateWindow("playgsf selector", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS);
+    if (!window) { fprintf(stderr, "SDL_CreateWindow error: %s\n", SDL_GetError()); TTF_Quit(); SDL_Quit(); return 1; }
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    if (!renderer) {
-        fprintf(stderr, "SDL_CreateRenderer error: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window);
-        TTF_Quit();
-        SDL_Quit();
-        return 1;
-    }
+    if (!renderer) { fprintf(stderr, "SDL_CreateRenderer error: %s\n", SDL_GetError()); SDL_DestroyWindow(window); TTF_Quit(); SDL_Quit(); return 1; }
     font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", FONT_SIZE);
-    if (!font) {
-        fprintf(stderr, "TTF_OpenFont error: cannot open font\n");
-        SDL_DestroyRenderer(renderer);
-        SDL_DestroyWindow(window);
-        TTF_Quit();
-        SDL_Quit();
-        return 1;
-    }
+    if (!font) { fprintf(stderr, "TTF_OpenFont error\n"); SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); TTF_Quit(); SDL_Quit(); return 1; }
     SDL_GameController* controller = nullptr;
     if (SDL_NumJoysticks() > 0) controller = SDL_GameControllerOpen(0);
+
     TrackMetadata current_meta;
+    int track_seconds = 0;
     using clock_type = std::chrono::steady_clock;
     auto playback_start = clock_type::now();
     int elapsed_seconds = 0;
+
     list_directory(current_path, true);
     draw_list();
     bool running = true;
     SDL_Event e;
+
     while (running) {
         SDL_Delay(16);
+
+        // ---- CONTROL DEL FIN DE PISTA y CAMBIO CENTRALIZADO ----
         if (playgsf_pid > 0 && !paused) {
             int status;
             pid_t ret = waitpid(playgsf_pid, &status, WNOHANG);
             if (ret == playgsf_pid) {
                 playgsf_pid = -1;
-                // Manejo del loop aquí:
-                if (loop_mode == LOOP_OFF) {
-                    // Parar reproducción, volver al listado
-                    mode = MODE_LIST;
-                    draw_list();
-                } else {
-                    int next_track = (loop_mode == LOOP_ONE) ? selected_index : find_next_track(selected_index, true);
-                    if (next_track != selected_index)
-                        selected_index = next_track;
-                    std::string filepath = current_path + "/" + entries[selected_index].name;
-                    if (read_metadata(filepath, current_meta))
-                        playback_start = clock_type::now();
-                    launch_playgsf(filepath);
-                    if (mode == MODE_PLAYBACK)
+                if (mode == MODE_PLAYBACK) {
+                    if (manual_switch) {
+                        int next_track = find_next_track(selected_index, manual_forward);
+                        if (next_track != selected_index) selected_index = next_track;
+                        manual_switch = false;
+                        std::string filepath = current_path + "/" + entries[selected_index].name;
+                        if (read_metadata(filepath, current_meta)) {
+                            track_seconds = parse_length(current_meta.length);
+                            playback_start = clock_type::now();
+                        }
+                        launch_playgsf(filepath);
                         draw_playback(current_meta, 0);
-                    else
-                        draw_list();
+                        mode = MODE_PLAYBACK; paused = false;
+                    } else {
+                        // FIN DE PISTA AUTOMÁTICO
+                        if (track_seconds > 0) {
+                            if (loop_mode == LOOP_OFF) {
+                                mode = MODE_LIST;
+                                draw_list();
+                            } else if (loop_mode == LOOP_ONE) {
+                                std::string filepath = current_path + "/" + entries[selected_index].name;
+                                if (read_metadata(filepath, current_meta)) {
+                                    track_seconds = parse_length(current_meta.length);
+                                    playback_start = clock_type::now();
+                                }
+                                launch_playgsf(filepath);
+                                draw_playback(current_meta, 0);
+                                mode = MODE_PLAYBACK; paused = false;
+                            } else if (loop_mode == LOOP_ALL) {
+                                int next_track = find_next_track(selected_index, true);
+                                if (next_track != selected_index) selected_index = next_track;
+                                std::string filepath = current_path + "/" + entries[selected_index].name;
+                                if (read_metadata(filepath, current_meta)) {
+                                    track_seconds = parse_length(current_meta.length);
+                                    playback_start = clock_type::now();
+                                }
+                                launch_playgsf(filepath);
+                                draw_playback(current_meta, 0);
+                                mode = MODE_PLAYBACK; paused = false;
+                            }
+                        }
+                    }
                 }
             }
         }
+
+        // ------ CONTROL DE TIEMPO: MATAR PROCESO si termina -----
         if (mode == MODE_PLAYBACK && playgsf_pid > 0 && !paused) {
             auto now = clock_type::now();
             elapsed_seconds = (int)std::chrono::duration_cast<std::chrono::seconds>(now - playback_start).count();
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds + 5) {
+                manual_switch = false; // Fin natural
+                kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
+            }
             draw_playback(current_meta, elapsed_seconds);
         }
-        if (controller && playgsf_pid > 0) {
+
+        // ------ CONTROL DE GATILLOS (L2/R2): SOLO MARCAR Y MATAR -------
+        if (controller && playgsf_pid > 0 && mode == MODE_PLAYBACK) {
             Sint16 l2 = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
             Sint16 r2 = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
             bool l2_pressed = (l2 > TRIGGER_THRESHOLD);
             bool r2_pressed = (r2 > TRIGGER_THRESHOLD);
-
-            if (l2_pressed && !l2_prev) {
-                int prev_track = find_next_track(selected_index, false);
-                if (prev_track != selected_index) {
-                    selected_index = prev_track;
-                    std::string filepath = current_path + "/" + entries[selected_index].name;
-                    if (read_metadata(filepath, current_meta))
-                        playback_start = clock_type::now();
-                    kill_playgsf();
-                    launch_playgsf(filepath);
-                    paused = false;
-                    if (mode == MODE_LIST) draw_list();
-                    else draw_playback(current_meta, 0);
-                }
-            }
-            if (r2_pressed && !r2_prev) {
-                int next_track = find_next_track(selected_index, true);
-                if (next_track != selected_index) {
-                    selected_index = next_track;
-                    std::string filepath = current_path + "/" + entries[selected_index].name;
-                    if (read_metadata(filepath, current_meta))
-                        playback_start = clock_type::now();
-                    kill_playgsf();
-                    launch_playgsf(filepath);
-                    paused = false;
-                    if (mode == MODE_LIST) draw_list();
-                    else draw_playback(current_meta, 0);
-                }
-            }
-            l2_prev = l2_pressed;
-            r2_prev = r2_pressed;
+            if (l2_pressed && !l2_prev) { manual_switch = true; manual_forward = false; kill_playgsf(); }
+            if (r2_pressed && !r2_prev) { manual_switch = true; manual_forward = true; kill_playgsf(); }
+            l2_prev = l2_pressed; r2_prev = r2_pressed;
         }
-        // Evento botón Y para cambiar loop
+
+        // --------------- MANEJO DE EVENTOS SDL ---------------
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) {
-                running = false;
-            } else if (e.type == SDL_CONTROLLERBUTTONDOWN) {
+            if (e.type == SDL_QUIT) running = false;
+            else if (e.type == SDL_CONTROLLERBUTTONDOWN) {
                 if (e.cbutton.button == SDL_CONTROLLER_BUTTON_GUIDE) {
                     if (!screen_off) {
                         system("wlr-randr --output DSI-1 --off");
@@ -421,72 +370,53 @@ int main() {
                         if (mode == MODE_LIST) draw_list();
                         else draw_playback(current_meta, elapsed_seconds);
                     }
-					SDL_Delay(60);
-                    continue;
+                    SDL_Delay(60); continue;
                 }
                 if (screen_off) continue;
-                
-                if (e.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) {
-                    running = false;
-                }
+                if (e.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) running = false;
 
-                if (mode == MODE_PLAYBACK && e.cbutton.button == SDL_CONTROLLER_BUTTON_Y) {
-                    loop_mode = static_cast<LoopMode>((loop_mode + 1) % 3);
-                    draw_playback(current_meta, elapsed_seconds);
-                    continue;
-                }
-
-                if (mode == MODE_LIST) {
+                if (mode == MODE_PLAYBACK) {
                     switch (e.cbutton.button) {
-                        case SDL_CONTROLLER_BUTTON_DPAD_UP:
-                            if (selected_index > 0) selected_index--;
-                            draw_list();
-                            break;
-                        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-                            if (selected_index < (int)entries.size() - 1) selected_index++;
-                            draw_list();
-                            break;
-                        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
-                            selected_index -= 10;
-                            if (selected_index < 0) selected_index = 0;
-                            draw_list();
-                            break;
-                        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
-                            selected_index += 10;
-                            if (selected_index >= (int)entries.size()) selected_index = (int)entries.size() - 1;
-                            draw_list();
-                            break;
-                        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: {
-                            int prev = find_next_track(selected_index, false);
-                            if (prev != selected_index) {
-                                selected_index = prev;
-                                draw_list();
+                        case SDL_CONTROLLER_BUTTON_B:
+                            kill_playgsf(); mode = MODE_LIST; draw_list(); break;
+                        case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+                            manual_switch = true; manual_forward = false; kill_playgsf(); break;
+                        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+                            manual_switch = true; manual_forward = true; kill_playgsf(); break;
+                        case SDL_CONTROLLER_BUTTON_Y:
+                            loop_mode = static_cast<LoopMode>((loop_mode + 1) % 3);
+                            draw_playback(current_meta, elapsed_seconds); break;
+                        case SDL_CONTROLLER_BUTTON_START:
+                            if (playgsf_pid > 0) {
+                                if (!paused) { kill(playgsf_pid, SIGSTOP); paused = true; }
+                                else { kill(playgsf_pid, SIGCONT); paused = false; }
                             }
                             break;
-                        }
-                        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: {
-                            int next = find_next_track(selected_index, true);
-                            if (next != selected_index) {
-                                selected_index = next;
-                                draw_list();
-                            }
-                            break;
-                        }
+                    }
+                } else if (mode == MODE_LIST) {
+                    switch (e.cbutton.button) {
+                        case SDL_CONTROLLER_BUTTON_DPAD_UP: if (selected_index > 0) selected_index--; draw_list(); break;
+                        case SDL_CONTROLLER_BUTTON_DPAD_DOWN: if (selected_index < (int)entries.size() - 1) selected_index++; draw_list(); break;
+                        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: selected_index -= 10; if (selected_index < 0) selected_index = 0; draw_list(); break;
+                        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: selected_index += 10; if (selected_index >= (int)entries.size()) selected_index = (int)entries.size() - 1; draw_list(); break;
+                        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: { int prev = find_next_track(selected_index, false); if (prev != selected_index) { selected_index = prev; draw_list(); } break; }
+                        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: { int next = find_next_track(selected_index, true); if (next != selected_index) { selected_index = next; draw_list(); } break; }
                         case SDL_CONTROLLER_BUTTON_A: {
-                            if (selected_index < 0 || selected_index >= (int)entries.size()) break;
-                            Entry& sel = entries[selected_index];
-                            if (sel.is_dir) {
-                                current_path += (current_path == "/" ? "" : "/") + sel.name;
-                                list_directory(current_path, true);
-                                draw_list();
-                            } else {
-                                std::string filepath = current_path + "/" + sel.name;
-                                if (read_metadata(filepath, current_meta))
-                                    draw_playback(current_meta, 0);
-                                launch_playgsf(filepath);
-                                mode = MODE_PLAYBACK;
-                                paused = false;
-                                playback_start = clock_type::now();
+                            if (selected_index >= 0 && selected_index < (int)entries.size()) {
+                                Entry& sel = entries[selected_index];
+                                if (sel.is_dir) {
+                                    current_path += (current_path == "/" ? "" : "/") + sel.name;
+                                    list_directory(current_path, true);
+                                    draw_list();
+                                } else {
+                                    std::string filepath = current_path + "/" + sel.name;
+                                    if (read_metadata(filepath, current_meta)) {
+                                        track_seconds = parse_length(current_meta.length); playback_start = clock_type::now();
+                                        draw_playback(current_meta, 0);
+                                    }
+                                    launch_playgsf(filepath);
+                                    mode = MODE_PLAYBACK; paused = false;
+                                }
                             }
                             break;
                         }
@@ -494,55 +424,7 @@ int main() {
                             if (current_path != MUSIC_ROOT) {
                                 size_t pos = current_path.find_last_of('/');
                                 current_path = (pos == std::string::npos || current_path == MUSIC_ROOT) ? MUSIC_ROOT : current_path.substr(0, pos);
-                                list_directory(current_path, true);
-                                draw_list();
-                            }
-                            break;
-                    }
-                } else if (mode == MODE_PLAYBACK) {
-                    switch (e.cbutton.button) {
-                        case SDL_CONTROLLER_BUTTON_B:
-                            kill_playgsf();
-                            mode = MODE_LIST;
-                            draw_list();
-                            break;
-                        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: {
-                            int prev = find_next_track(selected_index, false);
-                            if (prev != selected_index) {
-                                selected_index = prev;
-                                std::string filepath = current_path + "/" + entries[selected_index].name;
-                                if (read_metadata(filepath, current_meta))
-                                    draw_playback(current_meta, 0);
-                                kill_playgsf();
-                                launch_playgsf(filepath);
-                                paused = false;
-                                playback_start = clock_type::now();
-                            }
-                            break;
-                        }
-                        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: {
-                            int next = find_next_track(selected_index, true);
-                            if (next != selected_index) {
-                                selected_index = next;
-                                std::string filepath = current_path + "/" + entries[selected_index].name;
-                                if (read_metadata(filepath, current_meta))
-                                    draw_playback(current_meta, 0);
-                                kill_playgsf();
-                                launch_playgsf(filepath);
-                                paused = false;
-                                playback_start = clock_type::now();
-                            }
-                            break;
-                        }
-                        case SDL_CONTROLLER_BUTTON_START:
-                            if (playgsf_pid > 0) {
-                                if (!paused) {
-                                    kill(playgsf_pid, SIGSTOP);
-                                    paused = true;
-                                } else {
-                                    kill(playgsf_pid, SIGCONT);
-                                    paused = false;
-                                }
+                                list_directory(current_path, true); draw_list();
                             }
                             break;
                     }
@@ -550,7 +432,7 @@ int main() {
             }
         }
     }
-    
+
     kill_playgsf();
     if (controller) SDL_GameControllerClose(controller);
     TTF_CloseFont(font);

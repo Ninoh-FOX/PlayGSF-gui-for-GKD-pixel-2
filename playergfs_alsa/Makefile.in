@@ -1,0 +1,31 @@
+CC=@CC@
+CPP=@CXX@
+LD=$(CPP)
+
+CFLAGS=@CFLAGS@ -fPIC -fpermissive -std=gnu++14
+CXXFLAGS=@CXXFLAGS@ -fPIC -fpermissive -std=gnu++14
+LDFLAGS=@LDFLAGS@ -fPIC -fpermissive -no-pie -lSDL2 -lasound
+
+OBJS=gsf.o VBA/GBA.o VBA/Globals.o VBA/Sound.o VBA/Util.o VBA/bios.o VBA/memgzio.o VBA/snd_interp.o VBA/unzip.o linuxmain.o VBA/psftag.o \
+     libresample/src/filterkit.o libresample/src/resample.o libresample/src/resamplesubs.o
+
+all: $(OBJS) 
+	$(LD) $(LDFLAGS) $(OBJS) -o playgsf
+
+%.o: %.c %.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+%.o: %.cpp
+	$(CPP) $(CFLAGS) -c $< -o $@
+
+%.o: %.cpp %.h
+	$(CPP) $(CFLAGS) -c $< -o $@
+
+clean:
+	rm -rf *.o VBA/*.o playgsf autom4te.cache libresample/src/*.o
+
+distclean: 
+	rm -f *.o VBA/*.o playgsf config.cache config.status Makefile config.h config.log libresample/src/*.o
