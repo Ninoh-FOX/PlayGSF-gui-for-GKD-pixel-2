@@ -126,7 +126,7 @@ void list_directory(const std::string& path, bool reset_selection = true) {
 
 void kill_playgsf() {
     if (playgsf_pid > 0) {
-        kill(playgsf_pid, SIGKILL);
+        kill(playgsf_pid, SIGTERM);
         paused = false;
     }
 }
