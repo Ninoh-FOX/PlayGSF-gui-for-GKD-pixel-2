@@ -178,6 +178,7 @@ int parse_length(const std::string& str) {
 }
 
 bool read_metadata(const std::string& file, TrackMetadata& out) {
+    out = TrackMetadata{};
     char tag[50001] = {0};
     if (psftag_readfromfile((void*)tag, file.c_str())) return false;
     char buf[512] = {0};
