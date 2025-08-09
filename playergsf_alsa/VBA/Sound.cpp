@@ -114,14 +114,22 @@ extern "C"
 
 int soundVolume = 0;
 
+#ifndef NO_INTERPOLATION
 u8 soundBuffer[4][735];
 u16 directBuffer[2][735];
+#else
+u8 soundBuffer[6][735];
+#endif
 //u16 soundFinalWave[1470];
 u16 soundFinalWave[2304];
 int soundBufferLen = 576;
 int soundBufferTotalLen = 14700;
 int soundQuality = 1;
+#ifndef NO_INTERPOLATION
 int soundInterpolation = 4;
+#else
+int soundInterpolation = 0;
+#endif
 int soundPaused = 1;
 int soundPlay = 0;
 int soundTicks = soundQuality * USE_TICKS_AS;
@@ -136,7 +144,6 @@ int soundIndex = 0;
 int soundBufferIndex = 0;
 int soundDebug = 0;
 bool soundOffFlag = false;
-int enableDS = 1;
 
 int sound1On = 0;
 int sound1ATL = 0;
@@ -293,8 +300,12 @@ variable_desc soundSaveStruct[] = {
   { &soundDSBTimer, sizeof(int) },
   { &soundDSFifoB[0], 32 },
   { &soundDSBValue, sizeof(int) },
+#ifndef NO_INTERPOLATION
   { &soundBuffer[0][0], 4*735 },
   { &directBuffer[0][0], 2*2*735 },
+#else
+  { &soundBuffer[0][0], 6*735 },
+#endif
   { &soundFinalWave[0], 2*735 },
   { NULL, 0 }
 };
@@ -874,7 +885,11 @@ void soundChannel4()
 
 void soundDirectSoundA()
 {
+#ifndef NO_INTERPOLATION
   directBuffer[0][soundIndex] = interp_pop(0, calc_rate(soundDSATimer)); //soundDSAValue;
+#else
+  soundBuffer[4][soundIndex] = soundDSAValue;
+#endif
 }
 
 void soundDirectSoundATimer()
@@ -904,7 +919,11 @@ void soundDirectSoundATimer()
 
 void soundDirectSoundB()
 {
+#ifndef NO_INTERPOLATION
   directBuffer[1][soundIndex] = interp_pop(1, calc_rate(soundDSBTimer)); //soundDSBValue;
+#else
+  soundBuffer[5][soundIndex] = soundDSBValue;
+#endif
 }
 
 void soundDirectSoundBTimer()
@@ -949,6 +968,7 @@ void soundTimerOverflow(int timer)
 
 extern "C" int relvolume;
 
+#ifndef NO_INTERPOLATION
 void soundMix()
 {
   int res = 0;
@@ -999,7 +1019,7 @@ void soundMix()
     break;
   }
 
-  res = res*enableDS+cgbRes;
+  res += cgbRes;
 
   if(soundEcho) {
     res *= 2;
@@ -1090,7 +1110,7 @@ void soundMix()
     break;
   }
 
-  res = res*enableDS+cgbRes;
+  res += cgbRes;
   
   if(soundEcho) {
     res *= 2;
@@ -1139,6 +1159,198 @@ void soundMix()
   else
     soundFinalWave[soundBufferIndex++] = res;
 }
+#else
+
+void soundMix()
+{
+  int res = 0;
+  int cgbRes = 0;
+  int ratio = ioMem[0x82] & 3;
+  int dsaRatio = ioMem[0x82] & 4;
+  int dsbRatio = ioMem[0x82] & 8;
+ 
+ 
+  if((soundBalance & 16)) {
+    cgbRes = ((s8)soundBuffer[0][soundIndex]);
+  }
+  if((soundBalance & 32)) {
+    cgbRes += ((s8)soundBuffer[1][soundIndex]);
+  }
+  if((soundBalance & 64)) {
+    cgbRes += ((s8)soundBuffer[2][soundIndex]);
+  }
+  if((soundBalance & 128)) {
+    cgbRes += ((s8)soundBuffer[3][soundIndex]);
+  }
+
+  if((soundControl & 0x0200) && (soundEnableFlag & 0x100)){
+    if(!dsaRatio)
+      res = ((s8)soundBuffer[4][soundIndex])>>1;
+    else
+      res = ((s8)soundBuffer[4][soundIndex]);
+  }
+  
+  if((soundControl & 0x2000) && (soundEnableFlag & 0x200)){
+    if(!dsbRatio)
+      res += ((s8)soundBuffer[5][soundIndex])>>1;
+    else
+      res += ((s8)soundBuffer[5][soundIndex]);
+  }
+  
+  res = (res * 170);
+  cgbRes = (cgbRes * 52 * soundLevel1);
+
+  switch(ratio) {
+  case 0:
+  case 3: // prohibited, but 25%    
+    cgbRes >>= 2;
+    break;
+  case 1:
+    cgbRes >>= 1;
+    break;
+  case 2:
+    break;
+  }
+
+  res += cgbRes;
+
+  if(soundEcho) {
+    res *= 2;
+    res += soundFilter[soundEchoIndex];
+    res /= 2;
+    soundFilter[soundEchoIndex++] = res;
+  }
+
+  if(soundLowPass) {
+    soundLeft[4] = soundLeft[3];
+    soundLeft[3] = soundLeft[2];
+    soundLeft[2] = soundLeft[1];
+    soundLeft[1] = soundLeft[0];
+    soundLeft[0] = res;
+    res = (soundLeft[4] + 2*soundLeft[3] + 8*soundLeft[2] + 2*soundLeft[1] + soundLeft[0])/14;
+  }
+
+  switch(soundVolume) {
+  case 0:
+  case 1:
+  case 2:
+  case 3:
+    res *= (soundVolume+1);
+    break;
+  case 4:
+    res >>= 2;
+    break;
+  case 5:
+    res >>= 1;
+    break;
+  }
+
+  res = (int)((float) res * ((float)relvolume / 1000.0));
+  
+  if(res > 32767)
+    res = 32767;
+  if(res < -32768)
+    res = -32768;
+
+  if(soundReverse)
+    soundFinalWave[++soundBufferIndex] = res;
+  else
+    soundFinalWave[soundBufferIndex++] = res;
+  
+  res = 0;
+  cgbRes = 0;
+  
+  if((soundBalance & 1)) {
+    cgbRes = ((s8)soundBuffer[0][soundIndex]);
+  }
+  if((soundBalance & 2)) {
+    cgbRes += ((s8)soundBuffer[1][soundIndex]);
+  }
+  if((soundBalance & 4)) {
+    cgbRes += ((s8)soundBuffer[2][soundIndex]);
+  }
+  if((soundBalance & 8)) {
+    cgbRes += ((s8)soundBuffer[3][soundIndex]);
+  }
+
+  if((soundControl & 0x0100) && (soundEnableFlag & 0x100)){
+    if(!dsaRatio)
+      res = ((s8)soundBuffer[4][soundIndex])>>1;
+    else
+      res = ((s8)soundBuffer[4][soundIndex]);
+  }
+  
+  if((soundControl & 0x1000) && (soundEnableFlag & 0x200)){
+    if(!dsbRatio)
+      res += ((s8)soundBuffer[5][soundIndex])>>1;
+    else
+      res += ((s8)soundBuffer[5][soundIndex]);
+  }
+
+  res = (res * 170);
+  cgbRes = (cgbRes * 52 * soundLevel1);
+  
+  switch(ratio) {
+  case 0:
+  case 3: // prohibited, but 25%
+    cgbRes >>= 2;
+    break;
+  case 1:
+    cgbRes >>= 1;
+    break;
+  case 2:
+    break;
+  }
+
+  res += cgbRes;
+  
+  if(soundEcho) {
+    res *= 2;
+    res += soundFilter[soundEchoIndex];
+    res /= 2;
+    soundFilter[soundEchoIndex++] = res;
+
+    if(soundEchoIndex >= 4000)
+      soundEchoIndex = 0;
+  }
+
+  if(soundLowPass) {
+    soundRight[4] = soundRight[3];
+    soundRight[3] = soundRight[2];
+    soundRight[2] = soundRight[1];
+    soundRight[1] = soundRight[0];
+    soundRight[0] = res;
+    res = (soundRight[4] + 2*soundRight[3] + 8*soundRight[2] + 2*soundRight[1] + soundRight[0])/14;
+  }
+
+  switch(soundVolume) {
+  case 0:
+  case 1:
+  case 2:
+  case 3:
+    res *= (soundVolume+1);
+    break;
+  case 4:
+    res >>= 2;
+    break;
+  case 5:
+    res >>= 1;
+    break;
+  }
+
+  res = (float) res * ((float)relvolume / 1000.);
+  
+  if(res > 32767)
+    res = 32767;
+  if(res < -32768)
+    res = -32768;
+  
+  if(soundReverse)
+    soundFinalWave[-1+soundBufferIndex++] = res;
+  else
+    soundFinalWave[soundBufferIndex++] = res;
+}
+#endif
 
 extern "C" void DisplayError (char * Message, ...);
 
@@ -1514,8 +1726,13 @@ bool soundInit()
   memset(soundBuffer[1], 0, 735);
   memset(soundBuffer[2], 0, 735);
   memset(soundBuffer[3], 0, 735);
+#ifndef NO_INTERPOLATION
   memset(directBuffer[0], 0, 735*2);
   memset(directBuffer[1], 0, 735*2);
+#else
+  memset(soundBuffer[4], 0, 735);
+  memset(soundBuffer[5], 0, 735);
+#endif
     
   memset(soundFinalWave, 0, soundBufferLen);
     

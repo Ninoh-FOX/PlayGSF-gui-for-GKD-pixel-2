@@ -139,8 +139,10 @@ void about(HWND hwndParent)
 }
 
 extern int soundInterpolation;
+#ifndef NO_INTERPOLATION
 extern void interp_setup(int which);
 extern void interp_cleanup();
+#endif
 
 void init() { 
 //	DisplayError("Init Started");
@@ -148,12 +150,16 @@ void init() {
 //	DisplayError("Random Seed Initialized");
 	ReadSettings(); 
 //	DisplayError("User Settings Loaded");
+#ifndef NO_INTERPOLATION
 	interp_setup(soundInterpolation); 
+#endif
 //	DisplayError("Interpolation Set up");
 }
 
 void quit() { 
+#ifndef NO_INTERPOLATION
 interp_cleanup(); 
+#endif
 WriteSettings(); }
 
 int isourfile(char *fn) { return 0; } 
@@ -909,6 +915,11 @@ BOOL CALLBACK configDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 			SendMessage(w, CB_ADDSTRING, 0, (LPARAM)&"FIR");
 			SendMessage(w, CB_ADDSTRING, 0, (LPARAM)&"bandlimited");
 			SendMessage(w, CB_SETCURSEL, soundInterpolation, 0);
+#ifdef NO_INTERPOLATION
+			ShowWindow(w,FALSE);
+			w = GetDlgItem(hDlg, IDC_INTERP_STATIC);
+			ShowWindow(w,FALSE);
+#endif
 		}
 		
 		if (DetectSilence) CheckDlgButton(hDlg,IDC_DETSIL,BST_CHECKED);

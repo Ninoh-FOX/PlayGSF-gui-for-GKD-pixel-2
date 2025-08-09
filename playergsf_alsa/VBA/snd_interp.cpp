@@ -27,6 +27,8 @@
 */
 // quantizer scale of window coefs
 
+#ifndef NO_INTERPOLATION
+
 #define WFIR_QUANTBITS		14
 #define WFIR_QUANTSCALE		(1L<<WFIR_QUANTBITS)
 #define WFIR_8SHIFT			(WFIR_QUANTBITS-8)
@@ -500,6 +502,8 @@ foo_interpolate * get_filter(int which)
 
 // and here is the implementation specific code, in a messier state than the stuff above
 
+#endif
+
 extern bool timer0On;
 extern int timer0Reload;
 extern int timer0ClockReload;
@@ -521,30 +525,39 @@ double calc_rate(int timer)
 	}
 }
 
+#ifndef NO_INTERPOLATION
+
 static foo_interpolate * interp[2];
 
 static int interpolation = 0;
 
+#endif
+
 void interp_setup(int which)
 {
+#ifndef NO_INTERPOLATION
 	init_fir_table();
 	for (int i = 0; i < 2; i++)
 	{
 		interp[i] = get_filter(which);
 	}
 	interpolation = which;
+#endif
 }
 
 void interp_cleanup()
 {
+#ifndef NO_INTERPOLATION
 	for (int i = 0; i < 2; i++)
 	{
 		delete interp[i];
 	}
+#endif
 }
 
 void interp_switch(int which)
 {
+#ifndef NO_INTERPOLATION
 	for (int i = 0; i < 2; i++)
 	{
 		delete interp[i];
@@ -552,23 +565,32 @@ void interp_switch(int which)
 	}
 
 	interpolation = which;
+#endif
 }
 
 void interp_reset(int ch)
 {
+#ifndef NO_INTERPOLATION
 	if (soundInterpolation != interpolation) interp_switch(soundInterpolation);
 
 	interp[ch]->reset();
+#endif
 }
 
 void interp_push(int ch, int sample)
 {
+#ifndef NO_INTERPOLATION
 	if (soundInterpolation != interpolation) interp_switch(soundInterpolation);
 
 	interp[ch]->push(sample);
+#endif
 }
 
 int interp_pop(int ch, double rate)
 {
+#ifndef NO_INTERPOLATION
 	return interp[ch]->pop(rate);
+#else
+	return 0;
+#endif
 }

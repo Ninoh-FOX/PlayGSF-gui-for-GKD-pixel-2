@@ -135,7 +135,7 @@ bool launch_playgsf(const std::string& filepath) {
     if (playgsf_pid != -1) return false;
     pid_t pid = fork();
     if (pid == 0) {
-        execl("/usr/bin/playgsf", "playgsf", "-c", "-s", "-q", filepath.c_str(), nullptr);
+        execl("/usr/bin/playgsf", "playgsf", "-s", "-q", filepath.c_str(), nullptr);
         _exit(127);
     } else if (pid > 0) {
         playgsf_pid = pid;
@@ -275,29 +275,133 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
 
     SDL_Color green = {0, 255, 0, 255};
     SDL_Color orange = {255, 165, 0, 255};
+
+    // Obtener ancho máximo de etiquetas (por ejemplo con Copyright que suele ser largo)
+    int max_label_width = 0;
+    int h = 0;
+    const char* labels[] = {"Game:", "Title:", "Artist:", "Length:", "Elapsed:", "Year:", "GSF By:", "Copyright:"};
+    for (auto label : labels) {
+        int w = 0;
+        TTF_SizeText(font, label, &w, &h);
+        if (w > max_label_width) max_label_width = w;
+    }
+    const int padding = 10; // espacio entre etiqueta y dato
+
     int y = 20;
     render_text("Now Playing...", 20, y, green);
     y += 40;
 
-    if (!meta.game.empty())        { render_text("Game: ", 20, y, green); render_text(meta.game, 100, y, orange); y += 30; }
-    if (!meta.title.empty())       { render_text("Title: ", 20, y, green); render_text(meta.title, 100, y, orange); y += 30; }
-    if (!meta.artist.empty())      { render_text("Artist: ", 20, y, green); render_text(meta.artist, 100, y, orange); y += 30; }
-    if (!meta.length.empty()) {
-        std::string length_no_decimal = meta.length; size_t dot = length_no_decimal.find('.'); if (dot != std::string::npos) length_no_decimal = length_no_decimal.substr(0, dot);
-        render_text("Length: ", 20, y, green); render_text(length_no_decimal, 120, y, orange); y += 30;
+    if (!meta.game.empty()) {
+        render_text("Game:", 20, y, green);
+        render_text(meta.game, 20 + max_label_width + padding, y, orange);
+        y += 30;
     }
-    char buf[32]; snprintf(buf, sizeof(buf), "%02d:%02d", elapsed/60, elapsed%60);
-    render_text("Elapsed: ", 20, y, green); render_text(buf, 140, y, orange); y += 30;
-    if (!meta.year.empty())        { render_text("Year: ", 20, y, green); render_text(meta.year, 100, y, orange); y += 30; }
-    if (!meta.gsf_by.empty())      { render_text("GSF By: ", 20, y, green); render_text(meta.gsf_by, 120, y, orange); y += 30; }
-    if (!meta.copyright.empty())   { render_text("Copyright: ", 20, y, green); render_text(meta.copyright, 160, y, orange); y += 30; }
+    if (!meta.title.empty()) {
+        render_text("Title:", 20, y, green);
+        render_text(meta.title, 20 + max_label_width + padding, y, orange);
+        y += 30;
+    }
+    if (!meta.artist.empty()) {
+        render_text("Artist:", 20, y, green);
+        render_text(meta.artist, 20 + max_label_width + padding, y, orange);
+        y += 30;
+    }
+    if (!meta.length.empty()) {
+        // Quitar parte decimal si existe
+        std::string length_no_decimal = meta.length;
+        size_t dot = length_no_decimal.find('.');
+        if (dot != std::string::npos) length_no_decimal = length_no_decimal.substr(0, dot);
+    
+        // Parsear minutos y segundos
+        int min = 0, sec = 0;
+        size_t colon = length_no_decimal.find(':');
+        if (colon != std::string::npos) {
+            min = std::stoi(length_no_decimal.substr(0, colon));
+            sec = std::stoi(length_no_decimal.substr(colon + 1));
+        } else {
+            sec = std::stoi(length_no_decimal); // si no hay ':', es solo segundos
+        }
+    
+        // Formatear con dos digitos
+        char formatted_length[6];
+        snprintf(formatted_length, sizeof(formatted_length), "%02d:%02d", min, sec);
+    
+        // Mostrar texto con formato correcto
+        render_text("Length:", 20, y, green);
+        render_text(formatted_length, 20 + max_label_width + padding, y, orange);
+        y += 30;
+    }
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%02d:%02d", elapsed / 60, elapsed % 60);
+    render_text("Elapsed:", 20, y, green);
+    render_text(buf, 20 + max_label_width + padding, y, orange);
+    y += 30;
+    if (!meta.year.empty()) {
+        render_text("Year:", 20, y, green);
+        render_text(meta.year, 20 + max_label_width + padding, y, orange);
+        y += 30;
+    }
+    if (!meta.gsf_by.empty()) {
+        render_text("GSF By:", 20, y, green);
+        render_text(meta.gsf_by, 20 + max_label_width + padding, y, orange);
+        y += 30;
+    }
+    if (!meta.copyright.empty()) {
+        render_text("Copyright:", 20, y, green);
+        render_text(meta.copyright, 20 + max_label_width + padding, y, orange);
+        y += 30;
+    }
+
+    // Aquí dibujamos la barra de progreso, con posición vertical entre Copyright y Loop:
+    int y_progress = y + (SCREEN_HEIGHT - 100 - y) / 2; // Mitad del espacio entre copyright y loop
+
+    // Dibujar un rectángulo contenedor de la barra
+    int bar_x = 20;
+    int bar_w = SCREEN_WIDTH - 40;
+    int bar_h = 20;
+
+    SDL_Rect border_rect = {bar_x, y_progress, bar_w, bar_h};
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // Color blanco para borde
+    SDL_RenderDrawRect(renderer, &border_rect);
+
+    // Calcular progreso real basado en elapsed y duración (en segundos)
+    int total_seconds = 0;
+    if (!meta.length.empty()) {
+        // Suponemos el formato "m:ss" o "ss"
+        total_seconds = 0;
+        size_t colon_pos = meta.length.find(':');
+        if (colon_pos != std::string::npos) {
+            int min = std::stoi(meta.length.substr(0, colon_pos));
+            int sec = std::stoi(meta.length.substr(colon_pos + 1));
+            total_seconds = min * 60 + sec;
+        } else {
+            total_seconds = std::stoi(meta.length);
+        }
+    }
+    float progress = 0.0f;
+    if (total_seconds > 0) progress = (float)elapsed / total_seconds;
+    if (progress > 1.0f) progress = 1.0f;
+
+    // Dibujar barra interna con progreso en color verde
+    SDL_Rect fill_rect = {bar_x + 1, y_progress + 1, (int)((bar_w - 2) * progress), bar_h - 2};
+    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    SDL_RenderFillRect(renderer, &fill_rect);
+
     std::string looptxt = (loop_mode == LOOP_ALL) ? "ALL" : (loop_mode == LOOP_ONE) ? "ONE" : "OFF";
-    render_text("Loop: ", 500, SCREEN_HEIGHT-100, green);
-    render_text(looptxt, 570, SCREEN_HEIGHT-100, orange);
+    render_text("Loop:", 500, SCREEN_HEIGHT - 100, green);
+    render_text(looptxt, 570, SCREEN_HEIGHT - 100, orange);
+    
+    std::string status_text = paused ? "[PAUSED]" : "[PLAYING]";
+    int text_width = 0, text_height = 0;
+    TTF_SizeText(font, status_text.c_str(), &text_width, &text_height);
+    int x_centered = (SCREEN_WIDTH - text_width) / 2;  // Centrado horizontal
+    int y_status = SCREEN_HEIGHT - 100;
+    render_text(status_text, x_centered, y_status, orange);
 
     render_text("B:Back  L2/R2:Prev/Next  Y:Loop Mode  Menu:Lock", 10, SCREEN_HEIGHT - 70, green);
     render_text("ST:Pause  SL:exit", 10, SCREEN_HEIGHT - 40, green);
-	render_status_monitor(SCREEN_WIDTH);
+
+    render_status_monitor(SCREEN_WIDTH);
     SDL_RenderPresent(renderer);
 }
 
@@ -317,6 +421,8 @@ int main() {
     int track_seconds = 0;
     using clock_type = std::chrono::steady_clock;
     auto playback_start = clock_type::now();
+    clock_type::time_point paused_at;
+    int paused_seconds_total = 0;
     int elapsed_seconds = 0;
 	
 	last_battery_update = SDL_GetTicks();
@@ -351,6 +457,7 @@ int main() {
                         if (read_metadata(filepath, current_meta)) {
                             track_seconds = parse_length(current_meta.length);
                             playback_start = clock_type::now();
+                            paused_seconds_total = 0;
                         }
                         launch_playgsf(filepath);
                         draw_playback(current_meta, 0);
@@ -366,6 +473,7 @@ int main() {
                                 if (read_metadata(filepath, current_meta)) {
                                     track_seconds = parse_length(current_meta.length);
                                     playback_start = clock_type::now();
+                                    paused_seconds_total = 0;
                                 }
                                 launch_playgsf(filepath);
                                 draw_playback(current_meta, 0);
@@ -377,6 +485,7 @@ int main() {
                                 if (read_metadata(filepath, current_meta)) {
                                     track_seconds = parse_length(current_meta.length);
                                     playback_start = clock_type::now();
+                                    paused_seconds_total = 0;
                                 }
                                 launch_playgsf(filepath);
                                 draw_playback(current_meta, 0);
@@ -391,7 +500,7 @@ int main() {
         // ------ CONTROL DE TIEMPO: MATAR PROCESO si termina -----
         if (mode == MODE_PLAYBACK && playgsf_pid > 0 && !paused) {
             auto now = clock_type::now();
-            elapsed_seconds = (int)std::chrono::duration_cast<std::chrono::seconds>(now - playback_start).count();
+            elapsed_seconds = (int)std::chrono::duration_cast<std::chrono::seconds>(now - playback_start).count() - paused_seconds_total;
             if (loop_mode == LOOP_OFF) {
             if (track_seconds > 0 && elapsed_seconds >= track_seconds + 1) {
                 manual_switch = false; // Fin natural
@@ -458,9 +567,10 @@ int main() {
                             draw_playback(current_meta, elapsed_seconds); break;
                         case SDL_CONTROLLER_BUTTON_START:
                             if (playgsf_pid > 0) {
-                                if (!paused) { kill(playgsf_pid, SIGSTOP); paused = true; }
-                                else { kill(playgsf_pid, SIGCONT); paused = false; }
+                                if (!paused) { kill(playgsf_pid, SIGSTOP); paused = true; paused_at = clock_type::now(); }
+                                else { kill(playgsf_pid, SIGCONT); paused = false; auto now_chrono = clock_type::now(); paused_seconds_total += std::chrono::duration_cast<std::chrono::seconds>(now_chrono - paused_at).count(); }
                             }
+                            draw_playback(current_meta, elapsed_seconds);
                             break;
                     }
                 } else if (mode == MODE_LIST) {

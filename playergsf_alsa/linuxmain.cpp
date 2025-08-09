@@ -13,8 +13,6 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <time.h>
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_render.h>
 #include <mutex>
 #include <string>
 
@@ -37,7 +35,6 @@ int playforever=0;
 int fileoutput=0;
 int TrailingSilence=1000;
 int DetectSilence=0, silencedetected=0, silencelength=5;
-int CliOnly=0;
 int noinfo=0;
 }
 std::string OutputFile = std::string("");
@@ -76,57 +73,6 @@ int seek_needed; // if != -1, it is the point that the decode thread should seek
 
 static int g_playing = 0;
 static int g_must_exit = 0;
-
-struct RenderThread {
-	SDL_Renderer *rr;
-	SDL_Window *w;
-};
-
-static int render_thread(void *ptr) {
-	SDL_GL_SetSwapInterval(1);
-	auto w = SDL_CreateWindow("playgsf", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, W,  900, 0);
-	auto rr = SDL_CreateRenderer(w, -1, SDL_RENDERER_ACCELERATED);
-	int mybuf[6][2*W];
-	while (!g_must_exit) {
-		SDL_SetRenderDrawColor(rr, 0, 0, 0, SDL_ALPHA_OPAQUE);
-		SDL_RenderClear(rr);
-		SDL_SetRenderDrawColor(rr, 0, 255, 0, SDL_ALPHA_OPAQUE);
-		bufmtx.lock();
-		int c = curr_buf;
-		memcpy(mybuf, draw_buf[c], sizeof(mybuf));
-		bufmtx.unlock();
-		for (int i = 0; i < 6; i++) {
-			int offset = 100+150*i;
-			for (int j = 1; j < W; j++) {
-				if (mybuf[i][j-1] == mybuf[i][j])
-					SDL_RenderDrawLine(rr, j-1, offset-mybuf[i][j-1], j, offset-mybuf[i][j]);
-				else
-					SDL_RenderDrawLine(rr, j, offset-mybuf[i][j-1], j, offset-mybuf[i][j]);
-			}
-		}
-		SDL_RenderPresent(rr);
-		SDL_Event e;
-		while (SDL_PollEvent(&e)) {
-			if (e.type == SDL_QUIT) {
-				g_playing = false;
-				g_must_exit = true;
-			}
-			if (e.type == SDL_KEYDOWN) {
-				switch(e.key.keysym.sym) {
-				case SDLK_d:
-					enableDS ^= 1;
-					break;
-				case SDLK_RIGHT:
-					g_playing = false;
-					break;
-				}
-			}
-		}
-	}
-	SDL_DestroyRenderer(rr);
-	SDL_DestroyWindow(w);
-	return 0;
-}
 
 static snd_pcm_t *pcm_handle;
 static snd_pcm_hw_params_t *hw_params;
@@ -303,7 +249,6 @@ int main(int argc, char **argv)
 	char length_str[256], fade_str[256], volume[256], title_str[256];
 	char tmp_str[256];
 	char *tag;
-    SDL_Thread *thrd;
 
 	soundLowPass = 0;
 	soundEcho = 0;
@@ -315,27 +260,18 @@ int main(int argc, char **argv)
 	DefaultLength=150000;
 	TrailingSilence=1000;
 	playforever=0;
-	CliOnly=0;
 	OutputFile = "";
 	noinfo=0;
-	if (!CliOnly) {
-		SDL_Init(SDL_INIT_VIDEO);
-	}
 
-
-	while((r=getopt(argc, argv, "chlsrieqW:L:t:"))>=0)
+	while((r=getopt(argc, argv, "hlsrieqW:L:t:"))>=0)
 	{
 		char *e;
 		switch(r)
 		{
-			case 'c':
-				CliOnly = 1;
-				break;
 			case 'h':
 				printf("playgsf version %s (based on Highly Advanced version %s)\n\n",
 						VERSION_STR, HA_VERSION_STR);
 				printf("Usage: ./playgsf [options] files...\n\n");
-				printf("  -c        CLI only; do not display the SDL GUI\n");
 				printf("  -l        Enable low pass filer\n");
 				printf("  -s        Detect silence\n");
 				printf("  -L        Set silence length in seconds (for detection). Default 5\n");
@@ -409,9 +345,6 @@ int main(int argc, char **argv)
 	tag = (char*)malloc(50001);
 
 	fi = optind;
-	if (!CliOnly) {
-		thrd = SDL_CreateThread(render_thread, "render thread", NULL);
-	}
     
 	while (!g_must_exit && fi < argc)
 	{
@@ -567,16 +500,10 @@ int main(int argc, char **argv)
 			printf("\n--\n");
 		}
 		snd_pcm_drain(pcm_handle);
-        snd_pcm_close(pcm_handle);
+        	snd_pcm_close(pcm_handle);
 		fi++;
 	}
 
-	if (!CliOnly) {
-		SDL_WaitThread(thrd, NULL);
-	}
 	free(tag);
-	if (!CliOnly) {
-		SDL_Quit();
-	}
 	return 0;
 }
