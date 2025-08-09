@@ -64,6 +64,27 @@ static void clamp_index(int& idx, int low, int high) {
     if (idx > high) idx = high;
 }
 
+// ----- MONITORING BATTERY AND VOLUME -----
+static int battery = 0; // battery percentage from /sys/class/power_supply/battery/capacity
+static Uint32 last_battery_update = 0;
+static const Uint32 battery_update_interval = 1000; // 1 second in ms
+
+int read_battery_percent() {
+    FILE* f = fopen("/sys/class/power_supply/battery/capacity", "r");
+    if (!f) return -1;
+
+    int percent = -1;
+    if (fscanf(f, "%d", &percent) != 1) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    if (percent < 0) percent = 0;
+    else if (percent > 100) percent = 100;
+    return percent;
+}
+
 bool is_directory(const std::string& path) {
     struct stat st{};
     return stat(path.c_str(), &st) == 0 && (st.st_mode & S_IFDIR);
@@ -183,6 +204,33 @@ void render_text(const std::string& text, int x, int y, SDL_Color color) {
     SDL_DestroyTexture(tex);
 }
 
+void render_status_monitor(int screen_width) {
+    SDL_Color green = {0, 255, 0, 255};
+    SDL_Color orange = {255, 165, 0, 255};
+
+    const char* bat_label = "BAT:";
+    char bat_value[8];
+    snprintf(bat_value, sizeof(bat_value), "%d%% ", battery);
+
+    int bat_label_w = 0, bat_value_w = 0;
+    int h = 0;
+
+    TTF_SizeText(font, bat_label, &bat_label_w, &h);
+    TTF_SizeText(font, bat_value, &bat_value_w, &h);
+
+    int pad = 0;
+    int total_w = bat_label_w + bat_value_w + pad * 3;
+
+    int x = screen_width - 10 - total_w;  // usar parámetro
+    int y = 10;
+
+    render_text(bat_label, x, y, green);
+    x += bat_label_w;
+    render_text(bat_value, x, y, orange);
+}
+
+
+
 void draw_list() {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -249,6 +297,7 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
 
     render_text("B:Back  L2/R2:Prev/Next  Y:Loop Mode  Menu:Lock", 10, SCREEN_HEIGHT - 70, green);
     render_text("ST:Pause  SL:exit", 10, SCREEN_HEIGHT - 40, green);
+	render_status_monitor(SCREEN_WIDTH);
     SDL_RenderPresent(renderer);
 }
 
@@ -269,6 +318,8 @@ int main() {
     using clock_type = std::chrono::steady_clock;
     auto playback_start = clock_type::now();
     int elapsed_seconds = 0;
+	
+	last_battery_update = SDL_GetTicks();
 
     list_directory(current_path, true);
     draw_list();
@@ -278,6 +329,13 @@ int main() {
     while (running) {
         SDL_Delay(16);
 
+		Uint32 now = SDL_GetTicks();
+		if (now - last_battery_update >= battery_update_interval) {
+		    int new_battery = read_battery_percent();
+		    if (new_battery >= 0) battery = new_battery;
+		    last_battery_update = now;
+		}
+        
         // ---- CONTROL DEL FIN DE PISTA y CAMBIO CENTRALIZADO ----
         if (playgsf_pid > 0 && !paused) {
             int status;
@@ -335,12 +393,12 @@ int main() {
             auto now = clock_type::now();
             elapsed_seconds = (int)std::chrono::duration_cast<std::chrono::seconds>(now - playback_start).count();
             if (loop_mode == LOOP_OFF) {
-            if (track_seconds > 0 && elapsed_seconds >= track_seconds) {
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds + 1) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
             } else if (loop_mode == LOOP_ONE) {
-            if (track_seconds > 0 && elapsed_seconds >= track_seconds) {
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds + 1) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
