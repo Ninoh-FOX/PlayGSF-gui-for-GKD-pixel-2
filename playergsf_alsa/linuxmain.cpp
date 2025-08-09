@@ -187,54 +187,70 @@ void updateBuf(int c, int ch, float m, T *data, int datalen) {
 }
 extern "C" void writeSound(void)
 {
-	int ret = soundBufferLen;
-	//static auto last = steady_clock::now();
-	//auto now = steady_clock::now();
-	//duration<double> diff = now-last;
-	//fprintf(stderr, "%dhz\n", (int)(1/diff.count()));
-	//last = now;
-	int ratio = ioMem[0x82] & 3;
-	int dsaRatio = ioMem[0x82] & 4;
-	int dsbRatio = ioMem[0x82] & 8;
-	float m = soundLevel1;
-	switch(ratio) {
-		case 0:
-		case 3:
-			m /= 4.0;
-			break;
-		case 1:
-			m /= 2.0;
-			break;
-		case 2:
-			break;
-	}
+    int ret = soundBufferLen;
 
-	for (int i = 0; i < 4; i++)
-		updateBuf(curr_buf, i, m, soundBuffer[i], soundIndex);
-	if (!dsaRatio)
-		m = 0.5;
-	else
-		m = 1;
-	m = m / float(soundLevel1) / 52.0;
-	updateBuf(curr_buf, 4, m, directBuffer[0], soundIndex);
-	if (!dsbRatio)
-		m = 0.5;
-	else
-		m = 1;
-	m = m / float(soundLevel1) / 52.0;
-	updateBuf(curr_buf, 5, m, directBuffer[1], soundIndex);
+    int ratio = ioMem[0x82] & 3;
+    int dsaRatio = ioMem[0x82] & 4;
+    int dsbRatio = ioMem[0x82] & 8;
+    float m = soundLevel1;
 
-	bufmtx.lock();
-	curr_buf = !curr_buf;
-	bufmtx.unlock();
-
-	int frames_to_deliver = ret / (2 * sndNumChannels); // 2 bytes por muestra
-    int written = snd_pcm_writei(pcm_handle, soundFinalWave, frames_to_deliver);
-
-    if (written < 0) {
-        snd_pcm_prepare(pcm_handle); // Recuperar de underrun
+    switch(ratio) {
+        case 0:
+        case 3:
+            m /= 4.0;
+            break;
+        case 1:
+            m /= 2.0;
+            break;
+        case 2:
+            break;
     }
-	
+
+    for (int i = 0; i < 4; i++)
+        updateBuf(curr_buf, i, m, soundBuffer[i], soundIndex);
+
+    if (!dsaRatio) m = 0.5; else m = 1;
+    m = m / float(soundLevel1) / 52.0;
+    updateBuf(curr_buf, 4, m, directBuffer[0], soundIndex);
+
+    if (!dsbRatio) m = 0.5; else m = 1;
+    m = m / float(soundLevel1) / 52.0;
+    updateBuf(curr_buf, 5, m, directBuffer[1], soundIndex);
+
+    bufmtx.lock();
+    curr_buf = !curr_buf;
+    bufmtx.unlock();
+
+    // ==== Fade 5s después del length ====
+    static int pista_sin_fade = 0;
+    if (pista_sin_fade == 0 && TrackLength > 0 && FadeLength >= 0) {
+        pista_sin_fade = TrackLength - FadeLength;
+    }
+
+    static short tempBuffer[1470]; // Tamaño igual a soundFinalWave
+    memcpy(tempBuffer, soundFinalWave, ret);
+
+    if (pista_sin_fade > 0) {
+        int ms_desde_final = (int)decode_pos_ms - pista_sin_fade;
+        if (ms_desde_final >= 0 && ms_desde_final <= 5000) {
+            float factor = 1.0f - (float)ms_desde_final / 5000.0f;
+            if (factor < 0.0f) factor = 0.0f;
+
+            int samplesCount = ret / sizeof(short);
+            for (int i = 0; i < samplesCount; i++) {
+                tempBuffer[i] = (short)(tempBuffer[i] * factor);
+            }
+        }
+    }
+    // ===================================
+
+    int frames_to_deliver = ret / (2 * sndNumChannels);
+    int written = snd_pcm_writei(pcm_handle, tempBuffer, frames_to_deliver);
+    if (written < 0) {
+        snd_pcm_prepare(pcm_handle);
+    }
+
+    decode_pos_ms += (ret / (2 * sndNumChannels)) * 1000.0 / sndSamplesPerSec;
 }
 
 extern "C" void signal_handler(int sig)
