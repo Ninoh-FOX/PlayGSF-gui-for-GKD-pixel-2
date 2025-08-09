@@ -74,7 +74,7 @@ bool is_valid_music(const std::string& fname) {
     if (pos == std::string::npos) return false;
     std::string ext = fname.substr(pos);
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-    return ext == ".minigsf";
+    return (ext == ".minigsf" || ext == ".gsf");
 }
 
 void list_directory(const std::string& path, bool reset_selection = true) {
