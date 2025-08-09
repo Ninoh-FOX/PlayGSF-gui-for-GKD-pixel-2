@@ -334,9 +334,21 @@ int main() {
         if (mode == MODE_PLAYBACK && playgsf_pid > 0 && !paused) {
             auto now = clock_type::now();
             elapsed_seconds = (int)std::chrono::duration_cast<std::chrono::seconds>(now - playback_start).count();
+            if (loop_mode == LOOP_OFF) {
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds) {
+                manual_switch = false; // Fin natural
+                kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
+                }
+            } else if (loop_mode == LOOP_ONE) {
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds) {
+                manual_switch = false; // Fin natural
+                kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
+                }
+            } else {
             if (track_seconds > 0 && elapsed_seconds >= track_seconds + 5) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
+                }
             }
             draw_playback(current_meta, elapsed_seconds);
         }
