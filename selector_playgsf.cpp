@@ -240,7 +240,7 @@ void draw_list() {
     SDL_Color dir_color = {0,255,255,255};
     int lh = TTF_FontLineSkip(font);
     int help_h = lh * 4;
-    int max_lines = (SCREEN_HEIGHT - help_h) / lh - 1;
+    int max_lines = (SCREEN_HEIGHT - help_h) / lh;
     if (max_lines < 1) max_lines = 1;
     int total = (int)entries.size();
     clamp_index(selected_index, 0, total > 0 ? total - 1 : 0);
@@ -320,7 +320,9 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
             min = std::stoi(length_no_decimal.substr(0, colon));
             sec = std::stoi(length_no_decimal.substr(colon + 1));
         } else {
-            sec = std::stoi(length_no_decimal); // si no hay ':', es solo segundos
+            int total_sec = std::stoi(length_no_decimal);
+            min = total_sec / 60;
+            sec = total_sec % 60;
         }
     
         // Formatear con dos digitos
