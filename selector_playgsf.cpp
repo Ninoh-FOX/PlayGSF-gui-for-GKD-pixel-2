@@ -604,8 +604,24 @@ int main() {
                         case SDL_CONTROLLER_BUTTON_B:
                             if (current_path != MUSIC_ROOT) {
                                 size_t pos = current_path.find_last_of('/');
-                                current_path = (pos == std::string::npos || current_path == MUSIC_ROOT) ? MUSIC_ROOT : current_path.substr(0, pos);
-                                list_directory(current_path, true); draw_list();
+                                std::string last_folder = (pos != std::string::npos) 
+                                    ? current_path.substr(pos + 1)
+                                    : current_path;
+                        
+                                current_path = (pos == std::string::npos || current_path == MUSIC_ROOT) 
+                                    ? MUSIC_ROOT 
+                                    : current_path.substr(0, pos);
+                        
+                                list_directory(current_path, true);
+                        
+                                for (size_t i = 0; i < entries.size(); i++) {
+                                    if (entries[i].is_dir && entries[i].name == last_folder) {
+                                        selected_index = (int)i;
+                                        break;
+                                    }
+                                }
+                        
+                                draw_list();
                             }
                             break;
                     }
