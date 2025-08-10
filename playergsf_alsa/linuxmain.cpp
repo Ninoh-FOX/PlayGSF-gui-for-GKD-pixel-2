@@ -500,10 +500,14 @@ int main(int argc, char **argv)
 			printf("\n--\n");
 		}
         snd_pcm_drain(pcm_handle);
-        snd_pcm_close(pcm_handle);
 		fi++;
 	}
-
+	
+    if (tag) {
+        free(tag);
+        tag = NULL;
+    }
+	
 	if (pcm_handle) {
         snd_pcm_drop(pcm_handle);
         snd_pcm_close(pcm_handle);
