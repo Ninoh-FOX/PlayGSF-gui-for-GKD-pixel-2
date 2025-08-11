@@ -59,7 +59,7 @@ extern int soundBufferLen;
 extern int soundIndex;
 extern int8_t soundBuffer[4][735];
 extern uint8_t *ioMem;
-#ifdef C_CORE
+#ifdef DNO_INTERPOLATION
 extern int16_t directBuffer[2][735];
 #else
 int16_t directBuffer[2][735];
