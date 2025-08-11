@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 
 extern "C" {
 #include "VBA/psftag.h"
@@ -68,6 +69,12 @@ static void clamp_index(int& idx, int low, int high) {
 static int battery = 0; // battery percentage from /sys/class/power_supply/battery/capacity
 static Uint32 last_battery_update = 0;
 static const Uint32 battery_update_interval = 1000; // 1 second in ms
+
+std::string state_file_path() {
+    std::string dir = "/storage/.config/playgsf";
+    mkdir(dir.c_str(), 0755);
+    return dir + "/state.txt";
+}
 
 int read_battery_percent() {
     FILE* f = fopen("/sys/class/power_supply/battery/capacity", "r");
@@ -468,6 +475,35 @@ int main() {
 	last_battery_update = SDL_GetTicks();
 
     list_directory(current_path, true);
+    
+    {
+        std::ifstream ifs(state_file_path());
+        if (ifs) {
+            std::string last_path, last_name, last_type;
+            std::getline(ifs, last_path);
+            std::getline(ifs, last_name);
+            std::getline(ifs, last_type);
+    
+            if (!last_path.empty() && is_directory(last_path)) {
+                current_path = last_path;
+                list_directory(current_path, true);
+    
+                if (!last_name.empty()) {
+                    for (size_t i = 0; i < entries.size(); i++) {
+                        if (entries[i].name == last_name) {
+                            selected_index = (int)i;
+                            if (last_type == "DIR" && last_path != MUSIC_ROOT) {
+                                current_path += "/" + last_name;
+                                list_directory(current_path, true);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     draw_list();
     bool running = true;
     SDL_Event e;
@@ -676,6 +712,20 @@ int main() {
     }
 
     kill_playgsf();
+    
+    {
+        std::ofstream ofs(state_file_path());
+        if (ofs) {
+            ofs << current_path << "\n";
+            if (!entries.empty() && selected_index >= 0 && selected_index < (int)entries.size()) {
+                ofs << entries[selected_index].name << "\n";
+                ofs << (entries[selected_index].is_dir ? "DIR" : "FILE") << "\n";
+            } else {
+                ofs << "\n\n";
+            }
+        }
+    }
+    
     if (controller) SDL_GameControllerClose(controller);
     TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);
