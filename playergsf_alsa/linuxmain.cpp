@@ -59,7 +59,7 @@ extern int soundBufferLen;
 extern int soundIndex;
 extern int8_t soundBuffer[4][735];
 extern uint8_t *ioMem;
-extern int16_t directBuffer[2][735];
+int16_t directBuffer[2][735];
 extern int soundLevel1;
 extern int enableDS;
 
@@ -167,28 +167,25 @@ extern "C" void writeSound(void)
     curr_buf = !curr_buf;
     bufmtx.unlock();
 
-    // ==== Fade 5s después del length ====
-    static int pista_sin_fade = 0;
-    if (pista_sin_fade == 0 && TrackLength > 0 && FadeLength >= 0) {
-        pista_sin_fade = TrackLength - FadeLength;
-    }
-
-    static short tempBuffer[1470]; // Tamaño igual a soundFinalWave
+    static short tempBuffer[1470];
     memcpy(tempBuffer, soundFinalWave, ret);
 
-    if (pista_sin_fade > 0) {
-        int ms_desde_final = (int)decode_pos_ms - pista_sin_fade;
-        if (ms_desde_final >= 0 && ms_desde_final <= 5000) {
-            float factor = 1.0f - (float)ms_desde_final / 5000.0f;
-            if (factor < 0.0f) factor = 0.0f;
+    snd_pcm_sframes_t delay_frames = 0;
+    if (snd_pcm_delay(pcm_handle, &delay_frames) < 0)
+        delay_frames = 0;
 
-            int samplesCount = ret / sizeof(short);
-            for (int i = 0; i < samplesCount; i++) {
-                tempBuffer[i] = (short)(tempBuffer[i] * factor);
-            }
+    int time_to_end_ms = TrackLength - FadeLength;
+    if (time_to_end_ms < 0) time_to_end_ms = 0;
+
+    if (time_to_end_ms <= FadeLength) {
+        float factor = (float)time_to_end_ms / (float)FadeLength;
+        if (factor < 0.0f) factor = 0.0f;
+
+        int samplesCount = ret / sizeof(short);
+        for (int i = 0; i < samplesCount; i++) {
+            tempBuffer[i] = (short)(tempBuffer[i] * factor);
         }
     }
-    // ===================================
 
     int frames_to_deliver = ret / (2 * sndNumChannels);
     int written = snd_pcm_writei(pcm_handle, tempBuffer, frames_to_deliver);
@@ -414,6 +411,11 @@ int main(int argc, char **argv)
 				FadeLength = LengthFromString(fade_str);
 				BOLD(); printf("Fade: "); NORMAL();
 				printf("%s (%d ms)\n", fade_str, FadeLength);
+			} else {
+			    strcpy(fade_str, "5");
+			    FadeLength = LengthFromString(fade_str);
+			    BOLD(); printf("Manual Fade: "); NORMAL();
+			    printf("%s (%d ms)\n", fade_str, FadeLength);
 			}
 
 			if (!psftag_raw_getvar(tag, "length", length_str, sizeof(length_str)-1)) {
@@ -432,6 +434,11 @@ int main(int argc, char **argv)
 		} else {
 			if (!psftag_getvar(tag, "fade", fade_str, sizeof(fade_str)-1)) {
 				FadeLength = LengthFromString(fade_str);
+			} else {
+			    strcpy(fade_str, "5");
+			    FadeLength = LengthFromString(fade_str);
+			    BOLD(); printf("Manual Fade: "); NORMAL();
+			    printf("%s (%d ms)\n", fade_str, FadeLength);
 			}
 			
 			if (!psftag_raw_getvar(tag, "length", length_str, sizeof(length_str)-1)) {
@@ -456,6 +463,13 @@ int main(int argc, char **argv)
 		snd_pcm_hw_params_set_format(pcm_handle, hw_params, SND_PCM_FORMAT_S16_LE);
 		snd_pcm_hw_params_set_channels(pcm_handle, hw_params, sndNumChannels);
 		snd_pcm_hw_params_set_rate(pcm_handle, hw_params, sndSamplesPerSec, 0);
+		
+		unsigned int rate = sndSamplesPerSec;
+		snd_pcm_uframes_t buffer_size = 4096;
+		snd_pcm_uframes_t period_size = 1024;
+		
+		snd_pcm_hw_params_set_buffer_size_near(pcm_handle, hw_params, &buffer_size);
+		snd_pcm_hw_params_set_period_size_near(pcm_handle, hw_params, &period_size, NULL);
 		
 		if ((err = snd_pcm_hw_params(pcm_handle, hw_params)) < 0) {
 		    fprintf(stderr, "Error setting HW parameters: %s\n", snd_strerror(err));
