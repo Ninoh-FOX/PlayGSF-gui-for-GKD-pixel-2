@@ -39,7 +39,9 @@ std::string current_path = MUSIC_ROOT;
 int selected_index = 0;
 int scroll_offset = 0;
 int scroll_offset_title = 0;
-Uint32 scroll_start_time_title = 0;
+static Uint32 scroll_start_time_game = 0;
+static Uint32 scroll_start_time_title = 0;
+static Uint32 scroll_start_time_artist = 0;
 
 const int scroll_speed = 20;
 const int scroll_delay = 4000;
@@ -236,7 +238,7 @@ void render_text(const std::string& text, int x, int y, SDL_Color color) {
     SDL_DestroyTexture(tex);
 }
 
-void render_scrolling_text(const std::string &text, int x, int y, int max_width, SDL_Color color) {
+void render_scrolling_text(const std::string &text, int x, int y, int max_width, SDL_Color color, Uint32& scroll_start_time) {
     int text_width = 0, text_height = 0;
     TTF_SizeText(font, text.c_str(), &text_width, &text_height);
 
@@ -246,11 +248,12 @@ void render_scrolling_text(const std::string &text, int x, int y, int max_width,
     Uint32 now = SDL_GetTicks();
 
     if (text_width > max_width) {
-        if (scroll_start_time_title == 0) scroll_start_time_title = now;
-        Uint32 elapsed = now - scroll_start_time_title;
+        if (scroll_start_time == 0) scroll_start_time = now;
+        Uint32 elapsed = now - scroll_start_time;
 
         if (elapsed > (Uint32)scroll_delay) {
-            int scroll_pixels = (int)((elapsed - scroll_delay) * scroll_speed / 1000) % (text_width + max_width + 200);
+            int scroll_distance = text_width + max_width + SCREEN_WIDTH / 3;
+            int scroll_pixels = (int)((elapsed - scroll_delay) * scroll_speed / 1000) % scroll_distance;
 
             int render_x = x - scroll_pixels;
 
@@ -261,7 +264,7 @@ void render_scrolling_text(const std::string &text, int x, int y, int max_width,
             SDL_RenderCopy(renderer, tex, nullptr, &dst);
 
             if (render_x + text_width < x + max_width) {
-                dst.x = render_x + text_width + 200;
+                dst.x = render_x + text_width + SCREEN_WIDTH / 3;
                 SDL_RenderCopy(renderer, tex, nullptr, &dst);
             }
 
@@ -396,24 +399,25 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
     int y = 20;
     render_text("Now Playing...", 20, y, green);
     y += 40;
-
+    
     if (!meta.game.empty()) {
         render_text("Game:", 20, y, green);
-        render_scrolling_text(meta.game, x_text, y, max_width, orange);
+        render_scrolling_text(meta.game, x_text, y, max_width, orange, scroll_start_time_game);
         y += 30;
     }
     
     if (!meta.title.empty()) {
         render_text("Title:", 20, y, green);
-        render_scrolling_text(meta.title, x_text, y, max_width, orange);
+        render_scrolling_text(meta.title, x_text, y, max_width, orange, scroll_start_time_title);
+        y += 30;
+    }
+    
+    if (!meta.artist.empty()) {
+        render_text("Artist:", 20, y, green);
+        render_scrolling_text(meta.artist, x_text, y, max_width, orange, scroll_start_time_artist);
         y += 30;
     }
 
-    if (!meta.artist.empty()) {
-        render_text("Artist:", 20, y, green);
-        render_scrolling_text(meta.artist, x_text, y, max_width, orange);
-        y += 30;
-    }
 
     {
         int min = total_seconds / 60;
@@ -577,6 +581,9 @@ int main() {
                             }
                             playback_start = clock_type::now();
                             paused_seconds_total = 0;
+                            scroll_start_time_game = 0;
+                            scroll_start_time_title = 0;
+                            scroll_start_time_artist = 0;
                         }
                         launch_playgsf(filepath);
                         draw_playback(current_meta, 0);
@@ -593,6 +600,9 @@ int main() {
                                     track_seconds = parse_length(current_meta.length);
                                     playback_start = clock_type::now();
                                     paused_seconds_total = 0;
+                                    scroll_start_time_game = 0;
+                                    scroll_start_time_title = 0;
+                                    scroll_start_time_artist = 0;
                                 }
                                 launch_playgsf(filepath);
                                 draw_playback(current_meta, 0);
@@ -605,6 +615,9 @@ int main() {
                                     track_seconds = total_track_seconds(current_meta);
                                     playback_start = clock_type::now();
                                     paused_seconds_total = 0;
+                                    scroll_start_time_game = 0;
+                                    scroll_start_time_title = 0;
+                                    scroll_start_time_artist = 0;
                                 }
                                 launch_playgsf(filepath);
                                 draw_playback(current_meta, 0);
@@ -712,6 +725,9 @@ int main() {
                                 } else {
                                     std::string filepath = current_path + "/" + sel.name;
                                     if (read_metadata(filepath, current_meta)) {
+                                        scroll_start_time_game = 0;
+                                        scroll_start_time_title = 0;
+                                        scroll_start_time_artist = 0;
                                         track_seconds = parse_length(current_meta.length); playback_start = clock_type::now();
                                         draw_playback(current_meta, 0);
                                     }
