@@ -351,7 +351,12 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
         int fade_sec = parse_time_string(meta.fade);
         if (fade_sec == 0) fade_sec = 5;
 
-        int total_seconds = length_sec + fade_sec;
+        int total_seconds;
+        if (loop_mode == LOOP_ONE) {
+            total_seconds = length_sec;
+        } else {
+            total_seconds = length_sec + fade_sec;
+        }
 
         int min = total_seconds / 60;
         int sec = total_seconds % 60;
@@ -404,7 +409,12 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
     int fade_sec = parse_time_string(meta.fade);
     if (fade_sec == 0) fade_sec = 5;
 
-    int total_seconds = length_sec + fade_sec;
+    int total_seconds;
+        if (loop_mode == LOOP_ONE) {
+            total_seconds = length_sec;
+        } else {
+            total_seconds = length_sec + fade_sec;
+        }
 
     float progress = 0.0f;
     if (total_seconds > 0) {
@@ -485,7 +495,11 @@ int main() {
                         manual_switch = false;
                         std::string filepath = current_path + "/" + entries[selected_index].name;
                         if (read_metadata(filepath, current_meta)) {
-                            track_seconds = total_track_seconds(current_meta);
+                            if (loop_mode == LOOP_ONE) {
+                                track_seconds = parse_length(current_meta.length);
+                            } else {
+                                track_seconds = total_track_seconds(current_meta);
+                            }
                             playback_start = clock_type::now();
                             paused_seconds_total = 0;
                         }
@@ -501,7 +515,7 @@ int main() {
                             } else if (loop_mode == LOOP_ONE) {
                                 std::string filepath = current_path + "/" + entries[selected_index].name;
                                 if (read_metadata(filepath, current_meta)) {
-                                    track_seconds = total_track_seconds(current_meta);
+                                    track_seconds = parse_length(current_meta.length);
                                     playback_start = clock_type::now();
                                     paused_seconds_total = 0;
                                 }
@@ -539,7 +553,7 @@ int main() {
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
             } else if (loop_mode == LOOP_ONE) {
-            if (track_seconds > 0 && elapsed_seconds >= track_seconds) {
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds + 0.5) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
