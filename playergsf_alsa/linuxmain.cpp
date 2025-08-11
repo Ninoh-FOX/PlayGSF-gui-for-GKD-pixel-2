@@ -59,7 +59,11 @@ extern int soundBufferLen;
 extern int soundIndex;
 extern int8_t soundBuffer[4][735];
 extern uint8_t *ioMem;
+#ifdef C_CORE
+extern int16_t directBuffer[2][735];
+#else
 int16_t directBuffer[2][735];
+#endif
 extern int soundLevel1;
 extern int enableDS;
 
