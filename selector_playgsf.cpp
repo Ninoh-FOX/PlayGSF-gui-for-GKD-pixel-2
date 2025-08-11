@@ -38,6 +38,11 @@ std::vector<Entry> entries;
 std::string current_path = MUSIC_ROOT;
 int selected_index = 0;
 int scroll_offset = 0;
+int scroll_offset_title = 0;
+Uint32 scroll_start_time_title = 0;
+
+const int scroll_speed = 20;
+const int scroll_delay = 4000;
 
 pid_t playgsf_pid = -1;
 bool paused = false;
@@ -207,7 +212,7 @@ bool read_metadata(const std::string& file, TrackMetadata& out) {
     if (psftag_getvar(tag, "fade", buf, sizeof(buf)) == 0) {
         out.fade = buf;
     } else {
-        out.fade = "5";
+        out.fade = "10";
     }
 
     return true;
@@ -229,6 +234,47 @@ void render_text(const std::string& text, int x, int y, SDL_Color color) {
     SDL_QueryTexture(tex, nullptr, nullptr, &dst.w, &dst.h);
     SDL_RenderCopy(renderer, tex, nullptr, &dst);
     SDL_DestroyTexture(tex);
+}
+
+void render_scrolling_text(const std::string &text, int x, int y, int max_width, SDL_Color color) {
+    int text_width = 0, text_height = 0;
+    TTF_SizeText(font, text.c_str(), &text_width, &text_height);
+
+    SDL_Rect clip_rect = {x, y, max_width, text_height};
+    SDL_RenderSetClipRect(renderer, &clip_rect);
+
+    Uint32 now = SDL_GetTicks();
+
+    if (text_width > max_width) {
+        if (scroll_start_time_title == 0) scroll_start_time_title = now;
+        Uint32 elapsed = now - scroll_start_time_title;
+
+        if (elapsed > (Uint32)scroll_delay) {
+            int scroll_pixels = (int)((elapsed - scroll_delay) * scroll_speed / 1000) % (text_width + max_width + 200);
+
+            int render_x = x - scroll_pixels;
+
+            SDL_Surface *surf = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+            SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+
+            SDL_Rect dst = {render_x, y, text_width, text_height};
+            SDL_RenderCopy(renderer, tex, nullptr, &dst);
+
+            if (render_x + text_width < x + max_width) {
+                dst.x = render_x + text_width + 200;
+                SDL_RenderCopy(renderer, tex, nullptr, &dst);
+            }
+
+            SDL_DestroyTexture(tex);
+            SDL_FreeSurface(surf);
+
+            SDL_RenderSetClipRect(renderer, nullptr);
+            return;
+        }
+    }
+
+    SDL_RenderSetClipRect(renderer, nullptr);
+    render_text(text, x, y, color);
 }
 
 void render_status_monitor(int screen_width) {
@@ -331,6 +377,21 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
         if (w > max_label_width) max_label_width = w;
     }
     const int padding = 10;
+    
+    // Calcular progreso total (length + fade)
+    int length_sec = parse_time_string(meta.length);
+    int fade_sec = parse_time_string(meta.fade);
+    if (fade_sec == 0) fade_sec = 10;
+
+    int total_seconds;
+        if (loop_mode == LOOP_ONE) {
+            total_seconds = length_sec;
+        } else {
+            total_seconds = length_sec + fade_sec;
+        }
+    
+    int x_text = 20 + max_label_width + padding;
+    int max_width = SCREEN_WIDTH - x_text - 10;
 
     int y = 20;
     render_text("Now Playing...", 20, y, green);
@@ -338,33 +399,23 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
 
     if (!meta.game.empty()) {
         render_text("Game:", 20, y, green);
-        render_text(meta.game, 20 + max_label_width + padding, y, orange);
+        render_scrolling_text(meta.game, x_text, y, max_width, orange);
         y += 30;
     }
+    
     if (!meta.title.empty()) {
         render_text("Title:", 20, y, green);
-        render_text(meta.title, 20 + max_label_width + padding, y, orange);
+        render_scrolling_text(meta.title, x_text, y, max_width, orange);
         y += 30;
     }
+
     if (!meta.artist.empty()) {
         render_text("Artist:", 20, y, green);
-        render_text(meta.artist, 20 + max_label_width + padding, y, orange);
+        render_scrolling_text(meta.artist, x_text, y, max_width, orange);
         y += 30;
     }
 
     {
-        int length_sec = parse_time_string(meta.length);
-        if (length_sec == 0) length_sec = 150;
-        int fade_sec = parse_time_string(meta.fade);
-        if (fade_sec == 0) fade_sec = 5;
-
-        int total_seconds;
-        if (loop_mode == LOOP_ONE) {
-            total_seconds = length_sec;
-        } else {
-            total_seconds = length_sec + fade_sec;
-        }
-
         int min = total_seconds / 60;
         int sec = total_seconds % 60;
         char formatted_length[16];
@@ -410,18 +461,6 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
     SDL_Rect border_rect = {bar_x, y_progress, bar_w, bar_h};
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // borde blanco
     SDL_RenderDrawRect(renderer, &border_rect);
-
-    // Calcular progreso total (length + fade)
-    int length_sec = parse_time_string(meta.length);
-    int fade_sec = parse_time_string(meta.fade);
-    if (fade_sec == 0) fade_sec = 5;
-
-    int total_seconds;
-        if (loop_mode == LOOP_ONE) {
-            total_seconds = length_sec;
-        } else {
-            total_seconds = length_sec + fade_sec;
-        }
 
     float progress = 0.0f;
     if (total_seconds > 0) {
@@ -582,14 +621,14 @@ int main() {
             auto now = clock_type::now();
             elapsed_seconds = (int)std::chrono::duration_cast<std::chrono::seconds>(now - playback_start).count() - paused_seconds_total;
             int fade_sec = parse_length(current_meta.fade);
-            if (fade_sec == 0) fade_sec = 5;
+            if (fade_sec == 0) fade_sec = 10;
             if (loop_mode == LOOP_OFF) {
             if (track_seconds > 0 && elapsed_seconds >= track_seconds + 1) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
             } else if (loop_mode == LOOP_ONE) {
-            if (track_seconds > 0 && elapsed_seconds >= track_seconds + 0.5) {
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds + 1) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
