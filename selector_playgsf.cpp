@@ -55,7 +55,7 @@ bool manual_forward = true;
 
 // Estructura de metadatos de pista
 struct TrackMetadata {
-    std::string filename, title, artist, game, year, copyright, gsf_by, length;
+    std::string filename, title, artist, game, year, copyright, gsf_by, length, fade;
 };
 
 // Clamp manual (C++14)
@@ -181,6 +181,7 @@ bool read_metadata(const std::string& file, TrackMetadata& out) {
     out = TrackMetadata{};
     char tag[50001] = {0};
     if (psftag_readfromfile((void*)tag, file.c_str())) return false;
+
     char buf[512] = {0};
     out.filename = file;
     if (psftag_getvar(tag, "title", buf, sizeof(buf)) == 0) out.title = buf;
@@ -189,8 +190,26 @@ bool read_metadata(const std::string& file, TrackMetadata& out) {
     if (psftag_getvar(tag, "year", buf, sizeof(buf)) == 0) out.year = buf;
     if (psftag_getvar(tag, "copyright", buf, sizeof(buf)) == 0) out.copyright = buf;
     if (psftag_getvar(tag, "gsfby", buf, sizeof(buf)) == 0) out.gsf_by = buf;
-    if (psftag_getvar(tag, "length", buf, sizeof(buf)) == 0) out.length = buf;
+
+	if (psftag_getvar(tag, "length", buf, sizeof(buf)) == 0) {
+        out.length = buf;
+    } else {
+        out.length = "150";
+    }
+
+    if (psftag_getvar(tag, "fade", buf, sizeof(buf)) == 0) {
+        out.fade = buf;
+    } else {
+        out.fade = "5";
+    }
+
     return true;
+}
+
+int total_track_seconds(const TrackMetadata& m) {
+    int len = parse_length(m.length);
+    int fd = parse_length(m.fade);
+    return len + fd;
 }
 
 void render_text(const std::string& text, int x, int y, SDL_Color color) {
@@ -210,7 +229,7 @@ void render_status_monitor(int screen_width) {
     SDL_Color orange = {255, 165, 0, 255};
 
     const char* bat_label = "BAT:";
-    char bat_value[8];
+    char bat_value[16];
     snprintf(bat_value, sizeof(bat_value), "%d%% ", battery);
 
     int bat_label_w = 0, bat_value_w = 0;
@@ -230,7 +249,26 @@ void render_status_monitor(int screen_width) {
     render_text(bat_value, x, y, orange);
 }
 
-
+int parse_time_string(const std::string& time_str) {
+    std::string s = time_str;
+    size_t dot = s.find('.');
+    if (dot != std::string::npos) {
+        s = s.substr(0, dot);
+    }
+    size_t colon = s.find(':');
+    int min = 0, sec = 0;
+    try {
+        if (colon != std::string::npos) {
+            min = std::stoi(s.substr(0, colon));
+            sec = std::stoi(s.substr(colon + 1));
+        } else {
+            sec = std::stoi(s);
+        }
+    } catch (...) {
+        return 0;
+    }
+    return min * 60 + sec;
+}
 
 void draw_list() {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -277,7 +315,6 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
     SDL_Color green = {0, 255, 0, 255};
     SDL_Color orange = {255, 165, 0, 255};
 
-    // Obtener ancho máximo de etiquetas (por ejemplo con Copyright que suele ser largo)
     int max_label_width = 0;
     int h = 0;
     const char* labels[] = {"Game:", "Title:", "Artist:", "Length:", "Elapsed:", "Year:", "GSF By:", "Copyright:"};
@@ -286,7 +323,7 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
         TTF_SizeText(font, label, &w, &h);
         if (w > max_label_width) max_label_width = w;
     }
-    const int padding = 10; // espacio entre etiqueta y dato
+    const int padding = 10;
 
     int y = 20;
     render_text("Now Playing...", 20, y, green);
@@ -307,38 +344,34 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
         render_text(meta.artist, 20 + max_label_width + padding, y, orange);
         y += 30;
     }
-    if (!meta.length.empty()) {
-        // Quitar parte decimal si existe
-        std::string length_no_decimal = meta.length;
-        size_t dot = length_no_decimal.find('.');
-        if (dot != std::string::npos) length_no_decimal = length_no_decimal.substr(0, dot);
-    
-        // Parsear minutos y segundos
-        int min = 0, sec = 0;
-        size_t colon = length_no_decimal.find(':');
-        if (colon != std::string::npos) {
-            min = std::stoi(length_no_decimal.substr(0, colon));
-            sec = std::stoi(length_no_decimal.substr(colon + 1));
-        } else {
-            int total_sec = std::stoi(length_no_decimal);
-            min = total_sec / 60;
-            sec = total_sec % 60;
-        }
-    
-        // Formatear con dos digitos
-        char formatted_length[6];
+
+    {
+        int length_sec = parse_time_string(meta.length);
+        if (length_sec == 0) length_sec = 150;
+        int fade_sec = parse_time_string(meta.fade);
+        if (fade_sec == 0) fade_sec = 5;
+
+        int total_seconds = length_sec + fade_sec;
+
+        int min = total_seconds / 60;
+        int sec = total_seconds % 60;
+        char formatted_length[16];
         snprintf(formatted_length, sizeof(formatted_length), "%02d:%02d", min, sec);
-    
-        // Mostrar texto con formato correcto
+
         render_text("Length:", 20, y, green);
         render_text(formatted_length, 20 + max_label_width + padding, y, orange);
         y += 30;
     }
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%02d:%02d", elapsed / 60, elapsed % 60);
-    render_text("Elapsed:", 20, y, green);
-    render_text(buf, 20 + max_label_width + padding, y, orange);
-    y += 30;
+
+    {
+        int min = elapsed / 60;
+        int sec = elapsed % 60;
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%02d:%02d", min, sec);
+        render_text("Elapsed:", 20, y, green);
+        render_text(buf, 20 + max_label_width + padding, y, orange);
+        y += 30;
+    }
     if (!meta.year.empty()) {
         render_text("Year:", 20, y, green);
         render_text(meta.year, 20 + max_label_width + padding, y, orange);
@@ -355,49 +388,42 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
         y += 30;
     }
 
-    // Aquí dibujamos la barra de progreso, con posición vertical entre Copyright y Loop:
-    int y_progress = y + (SCREEN_HEIGHT - 100 - y) / 2; // Mitad del espacio entre copyright y loop
+    // Dibujar barra de progreso entre Copyright y Loop
+    int y_progress = y + (SCREEN_HEIGHT - 100 - y) / 2;
 
-    // Dibujar un rectángulo contenedor de la barra
     int bar_x = 20;
     int bar_w = SCREEN_WIDTH - 40;
     int bar_h = 20;
 
     SDL_Rect border_rect = {bar_x, y_progress, bar_w, bar_h};
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // Color blanco para borde
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // borde blanco
     SDL_RenderDrawRect(renderer, &border_rect);
 
-    // Calcular progreso real basado en elapsed y duración (en segundos)
-    int total_seconds = 0;
-    if (!meta.length.empty()) {
-        // Suponemos el formato "m:ss" o "ss"
-        total_seconds = 0;
-        size_t colon_pos = meta.length.find(':');
-        if (colon_pos != std::string::npos) {
-            int min = std::stoi(meta.length.substr(0, colon_pos));
-            int sec = std::stoi(meta.length.substr(colon_pos + 1));
-            total_seconds = min * 60 + sec;
-        } else {
-            total_seconds = std::stoi(meta.length);
-        }
-    }
-    float progress = 0.0f;
-    if (total_seconds > 0) progress = (float)elapsed / total_seconds;
-    if (progress > 1.0f) progress = 1.0f;
+    // Calcular progreso total (length + fade)
+    int length_sec = parse_time_string(meta.length);
+    int fade_sec = parse_time_string(meta.fade);
+    if (fade_sec == 0) fade_sec = 5;
 
-    // Dibujar barra interna con progreso en color verde
+    int total_seconds = length_sec + fade_sec;
+
+    float progress = 0.0f;
+    if (total_seconds > 0) {
+        progress = (float)elapsed / total_seconds;
+        if (progress > 1.0f) progress = 1.0f;
+    }
+
     SDL_Rect fill_rect = {bar_x + 1, y_progress + 1, (int)((bar_w - 2) * progress), bar_h - 2};
-    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // barra roja
     SDL_RenderFillRect(renderer, &fill_rect);
 
     std::string looptxt = (loop_mode == LOOP_ALL) ? "ALL" : (loop_mode == LOOP_ONE) ? "ONE" : "OFF";
     render_text("Loop:", 500, SCREEN_HEIGHT - 100, green);
     render_text(looptxt, 570, SCREEN_HEIGHT - 100, orange);
-    
+
     std::string status_text = paused ? "[PAUSED]" : "[PLAYING]";
     int text_width = 0, text_height = 0;
     TTF_SizeText(font, status_text.c_str(), &text_width, &text_height);
-    int x_centered = (SCREEN_WIDTH - text_width) / 2;  // Centrado horizontal
+    int x_centered = (SCREEN_WIDTH - text_width) / 2;
     int y_status = SCREEN_HEIGHT - 100;
     render_text(status_text, x_centered, y_status, orange);
 
@@ -407,6 +433,7 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
     render_status_monitor(SCREEN_WIDTH);
     SDL_RenderPresent(renderer);
 }
+
 
 int main() {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER) != 0) { fprintf(stderr, "SDL_Init error: %s\n", SDL_GetError()); return 1; }
@@ -458,7 +485,7 @@ int main() {
                         manual_switch = false;
                         std::string filepath = current_path + "/" + entries[selected_index].name;
                         if (read_metadata(filepath, current_meta)) {
-                            track_seconds = parse_length(current_meta.length);
+                            track_seconds = total_track_seconds(current_meta);
                             playback_start = clock_type::now();
                             paused_seconds_total = 0;
                         }
@@ -474,7 +501,7 @@ int main() {
                             } else if (loop_mode == LOOP_ONE) {
                                 std::string filepath = current_path + "/" + entries[selected_index].name;
                                 if (read_metadata(filepath, current_meta)) {
-                                    track_seconds = parse_length(current_meta.length);
+                                    track_seconds = total_track_seconds(current_meta);
                                     playback_start = clock_type::now();
                                     paused_seconds_total = 0;
                                 }
@@ -486,7 +513,7 @@ int main() {
                                 if (next_track != selected_index) selected_index = next_track;
                                 std::string filepath = current_path + "/" + entries[selected_index].name;
                                 if (read_metadata(filepath, current_meta)) {
-                                    track_seconds = parse_length(current_meta.length);
+                                    track_seconds = total_track_seconds(current_meta);
                                     playback_start = clock_type::now();
                                     paused_seconds_total = 0;
                                 }
@@ -504,18 +531,20 @@ int main() {
         if (mode == MODE_PLAYBACK && playgsf_pid > 0 && !paused) {
             auto now = clock_type::now();
             elapsed_seconds = (int)std::chrono::duration_cast<std::chrono::seconds>(now - playback_start).count() - paused_seconds_total;
+            int fade_sec = parse_length(current_meta.fade);
+            if (fade_sec == 0) fade_sec = 5;
             if (loop_mode == LOOP_OFF) {
             if (track_seconds > 0 && elapsed_seconds >= track_seconds + 1) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
             } else if (loop_mode == LOOP_ONE) {
-            if (track_seconds > 0 && elapsed_seconds >= track_seconds + 1) {
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
             } else {
-            if (track_seconds > 0 && elapsed_seconds >= track_seconds + 5) {
+            if (track_seconds > 0 && elapsed_seconds >= track_seconds + fade_sec) {
                 manual_switch = false; // Fin natural
                 kill_playgsf(); // Solo matar proceso, waitpid central decide siguiente acción
                 }
