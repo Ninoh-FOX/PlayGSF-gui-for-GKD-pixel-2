@@ -41,7 +41,7 @@ std::string OutputFile = std::string("");
 int cpupercent=0, sndSamplesPerSec, sndNumChannels;
 int sndBitsPerSample=16;
 
-int deflen=120,deffade=4;
+int deflen=120,deffade=10;
 #define W 800
 int draw_buf[2][6][2*W];
 int n_old[2][6];
@@ -59,10 +59,10 @@ extern int soundBufferLen;
 extern int soundIndex;
 extern int8_t soundBuffer[4][735];
 extern uint8_t *ioMem;
-#ifdef DNO_INTERPOLATION
-extern int16_t directBuffer[2][735];
-#else
+#ifdef NO_INTERPOLATION
 int16_t directBuffer[2][735];
+#else
+extern int16_t directBuffer[2][735];
 #endif
 extern int soundLevel1;
 extern int enableDS;
@@ -416,7 +416,7 @@ int main(int argc, char **argv)
 				BOLD(); printf("Fade: "); NORMAL();
 				printf("%s (%d ms)\n", fade_str, FadeLength);
 			} else {
-			    strcpy(fade_str, "5");
+			    strcpy(fade_str, "10");
 			    FadeLength = LengthFromString(fade_str);
 			    BOLD(); printf("Manual Fade: "); NORMAL();
 			    printf("%s (%d ms)\n", fade_str, FadeLength);
@@ -439,7 +439,7 @@ int main(int argc, char **argv)
 			if (!psftag_getvar(tag, "fade", fade_str, sizeof(fade_str)-1)) {
 				FadeLength = LengthFromString(fade_str);
 			} else {
-			    strcpy(fade_str, "5");
+			    strcpy(fade_str, "10");
 			    FadeLength = LengthFromString(fade_str);
 			    BOLD(); printf("Manual Fade: "); NORMAL();
 			    printf("%s (%d ms)\n", fade_str, FadeLength);
