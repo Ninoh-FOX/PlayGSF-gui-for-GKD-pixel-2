@@ -790,126 +790,133 @@ GSF_FILE decompressGSF(const char * file, int libnum=1)
 
 bool utildecompGSF(const char * file)
 {
-	unsigned int decompsize=12;
-	unsigned int offset;
-	unsigned int size;
-	char filename[260];
-	char tempname[260];
-	char libtag[0x40];
-	char libname[8];
-	char length[256],fade[256],volume[256];
+    unsigned int offset, size;
+    char filename[260], tempname[260];
+    char libtag[0x40], libname[8];
+    char length[256], fade[256], volume[256];
 
-	int i, j;
+    int i;
+    GSF_FILE gsffile, gsflib[MAX_GSFLIB];
 
-	GSF_FILE gsffile, gsflib[MAX_GSFLIB];
+    TrackLength = 0;
+    FadeLength = 0;
 
-	TrackLength=0;
-	FadeLength=0;
+    // Cargar archivo principal
+    gsffile = decompressGSF(file, 1);
+    gsflib[0] = gsffile;
+    if (!gsffile.gsfloaded) {
+        printf("Failed to load main GSF/MiniGSF\n");
+        return false;
+    }
 
+    utilGetBasePath(file, tempname);
 
-	gsffile = decompressGSF(file,1);
-	gsflib[0]=gsffile;
-	if(gsffile.gsfloaded == false) {
-		printf("Failed to load\n");
-		return false;
-	}
+    // Intentar cargar la librería base _lib
+    memset(libtag, 0, sizeof(libtag));
+    if (!psftag_raw_getvar(gsffile.psftag, "_lib", libtag, sizeof(libtag) - 1) && strlen(libtag) > 0) {
 
-   
-	
-	//if(gsffile.libname[0]!=0) {
-	if(!psftag_raw_getvar(gsffile.psftag,"_lib",libtag,sizeof(libtag)-1)) {
-
-		utilGetBasePath(file,tempname);
 #ifdef LINUX
-		sprintf(filename,"%s/%s",tempname,libtag);
+        sprintf(filename, "%s/%s", tempname, libtag);
 #else
-		sprintf(filename,"%s\\%s",tempname,libtag);
+        sprintf(filename, "%s\\%s", tempname, libtag);
 #endif
-		gsflib[1] = decompressGSF(filename,2);
 
-		if(gsflib[1].gsfloaded == false)
-		{
-			printf("Failed to load library\n");
-			free(uncompbuf);
-			return false;
-		}
+        if (access(filename, R_OK) != 0) {
+            fprintf(stderr, "Library file not found: %s\n", filename);
+            free(uncompbuf);
+            return false;
+        }
 
-//		memcpy(&offset,gsffile.program+4,sizeof(offset));
-		copy_int(&offset, gsffile.program+4);
-//		memcpy(&size,gsffile.program+8,sizeof(size));
-		copy_int(&size, gsffile.program+8);
-		
-		offset&=0x01FFFFFF;
-		memcpy(gsflib[1].program+12+offset,gsffile.program+12,size);
-		free(gsffile.program);
-		uncompbuf=gsflib[1].program;
+        gsflib[1] = decompressGSF(filename, 2);
+        if (!gsflib[1].gsfloaded) {
+            printf("Failed to load library: %s\n", filename);
+            free(uncompbuf);
+            return false;
+        }
 
+        copy_int(&offset, gsffile.program + 4);
+        copy_int(&size,   gsffile.program + 8);
+        offset &= 0x01FFFFFF;
+        memcpy(gsflib[1].program + 12 + offset, gsffile.program + 12, size);
 
-		for(i=2;i<MAX_GSFLIB;i++)
-		{
-			sprintf(libname,"_lib%d",i);
-			for(j=0;j<i;j++)
-			{
-				if(!psftag_raw_getvar(gsflib[j].psftag,libname,libtag,sizeof(libtag)-1)) {
-					sprintf(filename,"%s\\%s",tempname,libtag);
-					gsflib[i] = decompressGSF(filename,i+1);
-					if(gsflib[i].gsfloaded == false)
-					{
-						free(uncompbuf);
-						return false;
-					}
-//					memcpy(&offset,gsflib[i].program+4,sizeof(offset));
-					copy_int(&offset, gsflib[i].program+4);
-					//memcpy(&size,gsflib[i].program+8,sizeof(size));
-					copy_int(&size, gsflib[i].program+8);
-					offset&=0x01FFFFFF;
-					memcpy(gsflib[1].program+12+offset,gsflib[i].program+12,size);
-					free(gsflib[i].program);
-					break;
-				}
-			}
-			if(gsflib[i].program == NULL)
-				break;
-		}
+        free(gsffile.program);
+        uncompbuf = gsflib[1].program;
 
-		uncompbuf=gsflib[1].program;
+        // Secuencia para _lib2 ... _libN
+        for (i = 2; i < MAX_GSFLIB; i++) {
+            memset(libtag, 0, sizeof(libtag));
+            sprintf(libname, "_lib%d", i);
 
-	}
-	else
-		uncompbuf=gsffile.program;
+            // Buscar en las libs anteriores si alguna declara este _libX
+            bool found = false;
+            for (int j = 0; j < i; j++) {
+                if (!psftag_raw_getvar(gsflib[j].psftag, libname, libtag, sizeof(libtag) - 1)
+                    && strlen(libtag) > 0) {
 
-	psftag_raw_getvar(gsffile.psftag,"length",length,sizeof(length)-1);
-	if (/*!IgnoreTrackLength &&*/ strlen(length))
-		TrackLength=LengthFromString(length);
-	if (TrackLength <= 0) {
-	if (IgnoreTrackLength)
-		TrackLength=0;
-	}
-	psftag_raw_getvar(gsffile.psftag,"fade",fade,sizeof(fade)-1);
-	if (/*!IgnoreTrackLength &&*/ strlen(fade)) {
-		FadeLength=LengthFromString(fade);
-		TrackLength+=FadeLength; // comply with PSF standard timing:
-	}							 // "length" tag specifies length before fade,
-								// "fade" specifies length of fade
-	if (TrackLength <= 0) {
-	TrackLength=(deflen+deffade)*1000;
-	FadeLength=deffade*1000;
-	}
-	relvolume=0;
+#ifdef LINUX
+                    sprintf(filename, "%s/%s", tempname, libtag);
+#else
+                    sprintf(filename, "%s\\%s", tempname, libtag);
+#endif
 
-	psftag_raw_getvar(gsffile.psftag,"volume",volume,sizeof(volume)-1);
-	if(strlen(volume))
-		relvolume=VolumeFromString(volume);
-	if(relvolume==0) {
-		relvolume=defvolume;
-	}
-	  
+                    if (access(filename, R_OK) != 0) {
+                        fprintf(stderr, "Library file not found: %s\n", filename);
+                        free(uncompbuf);
+                        return false;
+                    }
 
+                    gsflib[i] = decompressGSF(filename, i + 1);
+                    if (!gsflib[i].gsfloaded) {
+                        free(uncompbuf);
+                        return false;
+                    }
 
-	return true;
+                    copy_int(&offset, gsflib[i].program + 4);
+                    copy_int(&size,   gsflib[i].program + 8);
+                    offset &= 0x01FFFFFF;
+                    memcpy(gsflib[1].program + 12 + offset, gsflib[i].program + 12, size);
 
+                    free(gsflib[i].program);
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) break; // No hay más libs → salir del bucle
+        }
+
+        uncompbuf = gsflib[1].program;
+    }
+    else {
+        uncompbuf = gsffile.program; // No tiene _lib
+    }
+
+    // Procesar tags length/fade/volume
+    if (!psftag_raw_getvar(gsffile.psftag, "length", length, sizeof(length) - 1) && strlen(length))
+        TrackLength = LengthFromString(length);
+
+    if (TrackLength <= 0 && IgnoreTrackLength)
+        TrackLength = 0;
+
+    if (!psftag_raw_getvar(gsffile.psftag, "fade", fade, sizeof(fade) - 1) && strlen(fade)) {
+        FadeLength = LengthFromString(fade);
+        TrackLength += FadeLength;
+    }
+
+    if (TrackLength <= 0) {
+        TrackLength = (deflen + deffade) * 1000;
+        FadeLength = deffade * 1000;
+    }
+
+    relvolume = 0;
+    if (!psftag_raw_getvar(gsffile.psftag, "volume", volume, sizeof(volume) - 1) && strlen(volume))
+        relvolume = VolumeFromString(volume);
+
+    if (relvolume == 0)
+        relvolume = defvolume;
+
+    return true;
 }
-
 
 bool utilIsGSF(const char * file)
 {
