@@ -519,7 +519,7 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
     render_text("Loop:", loop_label_x, y_pos, green);
     render_text(looptxt, loop_value_x, y_pos, orange);
 
-    render_text("B:Back  L2/R2:Prev/Next  Y:Loop Mode  X:Bass", 10, SCREEN_HEIGHT - 70, green);
+    render_text("B:Back L2/R2:Prev/Next Y:Loop Mode X:Bass Mode", 10, SCREEN_HEIGHT - 70, green);
     render_text("ST:Pause  SL:exit  Menu:Lock", 10, SCREEN_HEIGHT - 40, green);
 
     render_status_monitor(SCREEN_WIDTH);
