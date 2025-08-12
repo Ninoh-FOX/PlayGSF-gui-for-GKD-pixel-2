@@ -46,6 +46,8 @@ static Uint32 scroll_start_time_artist = 0;
 const int scroll_speed = 20;
 const int scroll_delay = 4000;
 
+bool bass_enabled_local = false;
+
 pid_t playgsf_pid = -1;
 bool paused = false;
 bool screen_off = false;
@@ -149,7 +151,12 @@ bool launch_playgsf(const std::string& filepath) {
     if (playgsf_pid != -1) return false;
     pid_t pid = fork();
     if (pid == 0) {
-        execl("/usr/bin/playgsf", "playgsf", "-s", "-q", filepath.c_str(), nullptr);
+        
+        if (bass_enabled_local)
+            execl("/usr/bin/playgsf", "playgsf", "-s", "-q", "-b", filepath.c_str(), nullptr);
+        else
+            execl("/usr/bin/playgsf", "playgsf", "-s", "-q", filepath.c_str(), nullptr);
+
         _exit(127);
     } else if (pid > 0) {
         playgsf_pid = pid;
@@ -476,19 +483,44 @@ void draw_playback(const TrackMetadata& meta, int elapsed) {
     SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // barra roja
     SDL_RenderFillRect(renderer, &fill_rect);
 
+    // Color para bass (activo/inactivo)
+    SDL_Color bass_color = bass_enabled_local ? SDL_Color{255, 0, 0, 255} : SDL_Color{120, 100, 0, 255};
+    int base_x = 10;
+    int y_pos = SCREEN_HEIGHT - 100;
+    
+    // Mostrar [BASS]
+    render_text("[BASS]", base_x, y_pos, bass_color);
+    
+    int bass_w = 0, bass_h = 0;
+    TTF_SizeText(font, "[BASS]", &bass_w, &bass_h);
+    
+    // Mostrar [PAUSED] o [PLAYING] justo a la derecha de [BASS]
+    std::string paused_text = "[PAUSED]";
+    std::string playing_text = "[PLAYING]";
+    
+    SDL_Color paused_color = paused ? SDL_Color{255, 165, 0, 255} : SDL_Color{120, 100, 0, 255};
+    SDL_Color playing_color = !paused ? SDL_Color{255, 165, 0, 255} : SDL_Color{120, 100, 0, 255};
+    
+    int paused_x = base_x + bass_w + 30;
+    render_text(paused_text, paused_x, y_pos, paused_color);
+    
+    int paused_w = 0, paused_h = 0;
+    TTF_SizeText(font, paused_text.c_str(), &paused_w, &paused_h);
+    
+    int playing_x = paused_x + paused_w + 30;
+    render_text(playing_text, playing_x, y_pos, playing_color);
+    
+    // Finalmente, mantener el renderizado de Loop: y su valor con el espacio que corresponda
     std::string looptxt = (loop_mode == LOOP_ALL) ? "ALL" : (loop_mode == LOOP_ONE) ? "ONE" : "OFF";
-    render_text("Loop:", 500, SCREEN_HEIGHT - 100, green);
-    render_text(looptxt, 570, SCREEN_HEIGHT - 100, orange);
+    
+    int loop_label_x = SCREEN_WIDTH - 140; // O ajustar según espacio necesario
+    int loop_value_x = loop_label_x + 70;
 
-    std::string status_text = paused ? "[PAUSED]" : "[PLAYING]";
-    int text_width = 0, text_height = 0;
-    TTF_SizeText(font, status_text.c_str(), &text_width, &text_height);
-    int x_centered = (SCREEN_WIDTH - text_width) / 2;
-    int y_status = SCREEN_HEIGHT - 100;
-    render_text(status_text, x_centered, y_status, orange);
+    render_text("Loop:", loop_label_x, y_pos, green);
+    render_text(looptxt, loop_value_x, y_pos, orange);
 
-    render_text("B:Back  L2/R2:Prev/Next  Y:Loop Mode  Menu:Lock", 10, SCREEN_HEIGHT - 70, green);
-    render_text("ST:Pause  SL:exit", 10, SCREEN_HEIGHT - 40, green);
+    render_text("B:Back  L2/R2:Prev/Next  Y:Loop Mode  X:Bass", 10, SCREEN_HEIGHT - 70, green);
+    render_text("ST:Pause  SL:exit  Menu:Lock", 10, SCREEN_HEIGHT - 40, green);
 
     render_status_monitor(SCREEN_WIDTH);
     SDL_RenderPresent(renderer);
@@ -522,10 +554,14 @@ int main() {
     {
         std::ifstream ifs(state_file_path());
         if (ifs) {
-            std::string last_path, last_name, last_type;
+            std::string last_path, last_name, last_type, last_bass;;
             std::getline(ifs, last_path);
             std::getline(ifs, last_name);
             std::getline(ifs, last_type);
+            std::getline(ifs, last_bass);
+            
+            if (!last_bass.empty())
+                bass_enabled_local = (last_bass == "1");
     
             if (!last_path.empty() && is_directory(last_path)) {
                 current_path = last_path;
@@ -699,6 +735,10 @@ int main() {
                         case SDL_CONTROLLER_BUTTON_Y:
                             loop_mode = static_cast<LoopMode>((loop_mode + 1) % 3);
                             draw_playback(current_meta, elapsed_seconds); break;
+						case SDL_CONTROLLER_BUTTON_X:
+                            bass_enabled_local = !bass_enabled_local;
+                            if (playgsf_pid > 0) { kill(playgsf_pid, SIGUSR2); }
+                            draw_playback(current_meta, elapsed_seconds); break;
                         case SDL_CONTROLLER_BUTTON_START:
                             if (playgsf_pid > 0) {
                                 if (!paused) { kill(playgsf_pid, SIGSTOP); paused = true; paused_at = clock_type::now(); }
@@ -778,6 +818,7 @@ int main() {
             } else {
                 ofs << "\n\n";
             }
+            ofs << (bass_enabled_local ? "1" : "0") << "\n";
         }
     }
     

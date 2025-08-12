@@ -15,6 +15,7 @@
 #include <time.h>
 #include <mutex>
 #include <string>
+#include <math.h>
 
 using std::chrono::steady_clock;
 using std::chrono::duration;
@@ -40,6 +41,7 @@ int noinfo=0;
 std::string OutputFile = std::string("");
 int cpupercent=0, sndSamplesPerSec, sndNumChannels;
 int sndBitsPerSample=16;
+int bass_boost_enabled = 0;
 
 int deflen=120,deffade=10;
 #define W 800
@@ -50,6 +52,13 @@ int last[2][6] = {
 	{2*W, 2*W, 2*W, 2*W, 2*W, 2*W},
 	{2*W, 2*W, 2*W, 2*W, 2*W, 2*W},
 };
+
+// Coeficientes filtro low-shelf
+static float b0_ls, b1_ls, b2_ls, a1_ls, a2_ls;
+
+// Estados del filtro para canal L y R
+static float x1L=0, x2L=0, y1L=0, y2L=0;
+static float x1R=0, x2R=0, y1R=0, y2R=0;
 
 int curr_buf;
 std::mutex bufmtx;
@@ -135,6 +144,45 @@ void updateBuf(int c, int ch, float m, T *data, int datalen) {
     last[!c][ch] = n_old[!c][ch] + datalen;
     assert(last[!c][ch] >= W);
 }
+static void lowshelf_init(float fs, float f0, float gainDB) {
+    float A  = powf(10.0f, gainDB / 40.0f);
+    float w0 = 2.0f * M_PI * f0 / fs;
+    float alpha = sinf(w0) / 2.0f * sqrtf( (A + 1/A) * (1.0f/0.707f - 1.0f) + 2.0f );
+    float k = cosf(w0);
+
+    float b0f =    A*((A+1) - (A-1)*k + 2.0f*sqrtf(A)*alpha);
+    float b1f =  2*A*((A-1) - (A+1)*k);
+    float b2f =    A*((A+1) - (A-1)*k - 2.0f*sqrtf(A)*alpha);
+    float a0f =       (A+1) + (A-1)*k + 2.0f*sqrtf(A)*alpha;
+    float a1f =  -2*((A-1) + (A+1)*k);
+    float a2f =       (A+1) + (A-1)*k - 2.0f*sqrtf(A)*alpha;
+
+    b0_ls = b0f / a0f;
+    b1_ls = b1f / a0f;
+    b2_ls = b2f / a0f;
+    a1_ls = a1f / a0f;
+    a2_ls = a2f / a0f;
+}
+static void lowshelf_process(short *samples, int count) {
+    for (int i = 0; i < count; i += 2) {
+        float inL = samples[i];
+        float inR = samples[i+1];
+
+        float outL = b0_ls*inL + b1_ls*x1L + b2_ls*x2L - a1_ls*y1L - a2_ls*y2L;
+        float outR = b0_ls*inR + b1_ls*x1R + b2_ls*x2R - a1_ls*y1R - a2_ls*y2R;
+
+        x2L = x1L; x1L = inL; y2L = y1L; y1L = outL;
+        x2R = x1R; x1R = inR; y2R = y1R; y1R = outR;
+
+        if (outL > 32767.0f) outL = 32767.0f;
+        if (outL < -32768.0f) outL = -32768.0f;
+        if (outR > 32767.0f) outR = 32767.0f;
+        if (outR < -32768.0f) outR = -32768.0f;
+
+        samples[i]   = (short)outL;
+        samples[i+1] = (short)outR;
+    }
+}
 extern "C" void writeSound(void)
 {
     int ret = soundBufferLen;
@@ -192,6 +240,10 @@ extern "C" void writeSound(void)
     }
 
     int frames_to_deliver = ret / (2 * sndNumChannels);
+	if (bass_boost_enabled) {
+        int samplesCount = ret / sizeof(short);
+        lowshelf_process(tempBuffer, samplesCount);
+    }  
     int written = snd_pcm_writei(pcm_handle, tempBuffer, frames_to_deliver);
     if (written < 0) {
         snd_pcm_prepare(pcm_handle);
@@ -239,6 +291,13 @@ static void shuffle_list(char *filelist[], int num_files)
 	}
 }
 
+extern "C" void handle_bass_toggle(int sig) {
+    if (sig == SIGUSR2) {
+        bass_boost_enabled = !bass_boost_enabled;
+        fprintf(stderr, "BASS BOOST %s\n", bass_boost_enabled ? "ON" : "OFF");
+    }
+}
+
 
 #define BOLD() printf("%c[36m", 27);
 #define NORMAL() printf("%c[0m", 27);
@@ -264,7 +323,7 @@ int main(int argc, char **argv)
 	OutputFile = "";
 	noinfo=0;
 
-	while((r=getopt(argc, argv, "hlsrieqW:L:t:"))>=0)
+	while((r=getopt(argc, argv, "hlsrbieqW:L:t:"))>=0)
 	{
 		char *e;
 		switch(r)
@@ -294,6 +353,9 @@ int main(int argc, char **argv)
 			case 's':
 				DetectSilence = 1;
 				break;
+			case 'b':
+                bass_boost_enabled = 1;
+                break;
 			case 'L':
 				silencelength = strtol(optarg, &e, 0);
 				if (e==optarg) {
@@ -471,6 +533,9 @@ int main(int argc, char **argv)
 		unsigned int rate = sndSamplesPerSec;
 		snd_pcm_uframes_t buffer_size = 4096;
 		snd_pcm_uframes_t period_size = 1024;
+		
+		lowshelf_init((float)sndSamplesPerSec, 200.0f, 10.0f);
+		signal(SIGUSR2, handle_bass_toggle);
 		
 		snd_pcm_hw_params_set_buffer_size_near(pcm_handle, hw_params, &buffer_size);
 		snd_pcm_hw_params_set_period_size_near(pcm_handle, hw_params, &period_size, NULL);
