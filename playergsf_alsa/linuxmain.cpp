@@ -534,7 +534,7 @@ int main(int argc, char **argv)
 		snd_pcm_uframes_t buffer_size = 4096;
 		snd_pcm_uframes_t period_size = 1024;
 		
-		lowshelf_init((float)sndSamplesPerSec, 200.0f, 10.0f);
+		lowshelf_init((float)sndSamplesPerSec, 250.0f, 6.0f);
 		signal(SIGUSR2, handle_bass_toggle);
 		
 		snd_pcm_hw_params_set_buffer_size_near(pcm_handle, hw_params, &buffer_size);
